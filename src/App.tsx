@@ -33,7 +33,7 @@ const App: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisStep, setAnalysisStep] = useState<string>('Initializing');
-  const [screen, setScreen] = useState<'landing' | 'collection' | 'game' | 'settings'>('landing');
+  const [screen, setScreen] = useState<'landing' | 'collection' | 'game' | 'settings' | 'help'>('landing');
 
   const [user, setUser] = useState<UserStats>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.USER);

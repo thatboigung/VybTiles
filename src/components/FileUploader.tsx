@@ -91,7 +91,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onUpload, isAnalyzin
           </div>
 
           <div className="hidden sm:block text-[8px] font-black text-slate-700 uppercase tracking-tighter opacity-50">
-            CORE_SYNC_V2
+            GAVENA  CORE_SYNC_V2
           </div>
         </div>
 
