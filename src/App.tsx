@@ -290,8 +290,24 @@ const App: React.FC = () => {
       }
     }
 
-    // Award stars based on difficulty
-    const starsEarned = difficulty === 'hard' ? 6 : difficulty === 'medium' ? 3 : 2;
+    // Award stars based on progress and difficulty
+    // 1. Base stars: 1 star for every 10% completion
+    const baseStars = Math.floor(completion / 10);
+
+    // 2. Difficulty Bonuses
+    let bonusStars = 0;
+    if (difficulty === 'easy') {
+      if (completion >= 100) bonusStars = 5;
+      else if (completion >= 50) bonusStars = 2;
+    } else if (difficulty === 'medium') {
+      if (completion >= 100) bonusStars = 10;
+      else if (completion >= 50) bonusStars = 5;
+    } else if (difficulty === 'hard') {
+      if (completion >= 100) bonusStars = 20;
+      else if (completion >= 50) bonusStars = 10;
+    }
+
+    const starsEarned = baseStars + bonusStars;
 
     // Calculate EXP based on perfects
     const earnedExp = sessionPerfects * 10;
