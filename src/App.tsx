@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
+import type { Level } from './types';
 import { Header } from './components/Header';
 import { FileUploader } from './components/FileUploader';
 import { BeatGame } from './components/BeatGame';
@@ -7,6 +8,9 @@ import { HistoryList } from './components/HistoryList';
 import { Settings } from './components/Settings';
 import { LandingPage } from './components/LandingPage';
 import { BottomNav } from './components/BottomNav';
+import { ExchangeSuccessModal } from './components/ExchangeSuccessModal';
+import { ResourceShopModal } from './components/ResourceShopModal';
+import { InsufficientFundsModal } from './components/InsufficientFundsModal';
 import type { AudioAnalysis, UserStats } from './types';
 import { analyzeLocally } from './services/geminiService';
 import { storageService } from './services/storageService';
@@ -21,7 +25,6 @@ const STORAGE_KEYS = {
 };
 
 const MAX_HEARTS = 10;
-const REGEN_TIME = 70;
 
 const App: React.FC = () => {
   const [currentPlaylist, setCurrentPlaylist] = useState<AudioAnalysis[] | null>(null);
@@ -53,6 +56,8 @@ const App: React.FC = () => {
       level: 1,
       playtime: 0,
       songsPlayed: 0,
+      perfects: 0, // Gold Bars
+      stars: 30,
       isPro: false
     };
   });
@@ -63,10 +68,27 @@ const App: React.FC = () => {
   });
   const [shields, setShields] = useState<number>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.SHIELDS);
-    return saved !== null ? Number(saved) : 5;
+    return saved !== null ? Number(saved) : 10;
   });
-  const [timeToNextHeart, setTimeToNextHeart] = useState<number>(REGEN_TIME);
   const [showResourceMenu, setShowResourceMenu] = useState(false);
+  const [showExchangeSuccess, setShowExchangeSuccess] = useState(false);
+  const [insufficientFunds, setInsufficientFunds] = useState<{ isOpen: boolean; currency: 'stars' | 'gold'; required: number } | null>(null);
+
+  // Auto-Exchange Logic: Ensure user always has 10 stars if they have enough gold
+  useEffect(() => {
+    if ((user.stars || 0) < 10 && (user.perfects || 0) >= 100) {
+      // Auto-exchange 100 Gold -> 10 Stars
+      setUser(prev => ({
+        ...prev,
+        perfects: (prev.perfects || 0) - 100,
+        stars: (prev.stars || 0) + 10
+      }));
+      // Optional: Show modal or just do it silently? User asked for "automatic", usually implies check & fix.
+      // Showing modal might be annoying if it loops. Let's show it for clarity once.
+      setExchangeInfo({ cost: 100, gained: 10 });
+      setShowExchangeSuccess(true);
+    }
+  }, [user.stars, user.perfects]);
 
   const audioContextRef = useRef<AudioContext | null>(null);
 
@@ -105,22 +127,7 @@ const App: React.FC = () => {
     localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(user));
   }, [hearts, shields, user]);
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      if (hearts < MAX_HEARTS) {
-        setTimeToNextHeart(prev => {
-          if (prev <= 1) {
-            setHearts(h => Math.min(MAX_HEARTS, h + 1));
-            return REGEN_TIME;
-          }
-          return prev - 1;
-        });
-      } else {
-        setTimeToNextHeart(REGEN_TIME);
-      }
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [hearts]);
+
 
   const handleLandingComplete = (username: string) => {
     setUser(prev => ({ ...prev, username }));
@@ -128,7 +135,37 @@ const App: React.FC = () => {
     setScreen('collection');
   };
 
+
+  const handleLogout = async () => {
+    // 1. Clear IndexedDB (Songs)
+    await storageService.clearAllData();
+
+    // 2. Clear LocalStorage (User Stats, History, etc.)
+    localStorage.removeItem(STORAGE_KEYS.USER);
+    localStorage.removeItem(STORAGE_KEYS.HEARTS);
+    localStorage.removeItem(STORAGE_KEYS.SHIELDS);
+    localStorage.removeItem(STORAGE_KEYS.SETUP_COMPLETE);
+
+    // 3. Reset State
+    setUser({ username: '', exp: 0, level: 1, songsPlayed: 0, playtime: 0, perfects: 0, stars: 30 });
+    setHistory([]);
+    setCurrentPlaylist([]);
+    setHearts(MAX_HEARTS);
+    setShields(10); // Reset to 10 shields on new game start
+
+    // 4. Redirect to Landing
+    setScreen('landing');
+  };
+
   const handleFileUpload = async (file: File) => {
+    if ((user.stars || 0) < 10) {
+      setInsufficientFunds({ isOpen: true, currency: 'stars', required: 10 });
+      return;
+    }
+
+    // Deduct cost immediately
+    setUser(prev => ({ ...prev, stars: (prev.stars || 0) - 10 }));
+
     setIsAnalyzing(true);
     setAnalysisStep('Syncing Core');
     try {
@@ -237,26 +274,44 @@ const App: React.FC = () => {
     }
   };
 
-  const startEndlessMode = () => {
-    const validTracks = history.filter(track => track.fileUrl);
-    if (validTracks.length < 1) {
-      alert("Requires at least 1 active track in history. Re-upload tracks to populate local buffer.");
-      return;
-    }
-    const shuffled = [...validTracks].sort(() => Math.random() - 0.5);
-    setCurrentPlaylist(shuffled);
-    setScreen('game');
-  };
 
-  const handleGameFinish = (earnedExp: number, sessionHearts: number, sessionShields: number) => {
+
+  const handleGameFinish = (earnedExp: number, sessionHearts: number, sessionShields: number, completion: number, sessionPerfects: number, difficulty: Level) => {
+    // Update track stats if current completion is better
+    if (currentPlaylist && currentPlaylist.length > 0) {
+      const trackId = currentPlaylist[0].id;
+      const currentBest = history.find(t => t.id === trackId)?.completion || 0;
+
+      if (completion > currentBest) {
+        // Update local state
+        setHistory(prev => prev.map(t => t.id === trackId ? { ...t, completion } : t));
+        // Update persisted storage
+        storageService.updateTrackStats(trackId, { completion });
+      }
+    }
+
+    // Star Rewards Logic based on Difficulty
+    let starsEarned = 0;
+    if (completion >= 100) {
+      if (difficulty === 'hard') starsEarned = 13;
+      else if (difficulty === 'medium') starsEarned = 8;
+      else starsEarned = 5; // Easy/Default
+    } else if (completion >= 50) {
+      if (difficulty === 'hard') starsEarned = 6;
+      else if (difficulty === 'medium') starsEarned = 3;
+      else starsEarned = 2; // Easy/Default
+    }
+
     setUser(prev => {
       const newExp = prev.exp + earnedExp;
       return {
         ...prev,
         exp: newExp,
-        level: Math.floor(newExp / 1000) + 1,
+        level: Math.floor(newExp / 10000) + 1, // 10000 EXP = 1 Level
         songsPlayed: (prev.songsPlayed || 0) + 1,
-        playtime: (prev.playtime || 0) + 180 // Approx 3 mins per song
+        playtime: (prev.playtime || 0) + 180, // Approx 3 mins per song
+        perfects: (prev.perfects || 0) + sessionPerfects,
+        stars: (prev.stars || 0) + starsEarned
       };
     });
     // Add collected hearts and shields to global currency
@@ -264,9 +319,15 @@ const App: React.FC = () => {
     setShields(prev => prev + sessionShields);
   };
 
-  const handleUseCurrency = (h: number, s: number) => {
+  const handleUseCurrency = (h: number, s: number, g: number = 0) => {
     setHearts(prev => Math.max(0, prev - h));
     setShields(prev => Math.max(0, prev - s));
+    if (g > 0) {
+      setUser(prev => ({
+        ...prev,
+        perfects: Math.max(0, (prev.perfects || 0) - g)
+      }));
+    }
   };
 
   const handleUpdateProfile = (newUsername: string) => {
@@ -278,21 +339,43 @@ const App: React.FC = () => {
     alert("Welcome to Pro! Ads removed (simulated).");
   };
 
-  const handleLogout = async () => {
-    // Clear Local Storage
-    localStorage.clear();
-    // Clear IndexedDB
-    try {
-      // We'd ideally have a clear method in storageService, but deleting DB is also an option.
-      // For now, we'll just reload which clears transient state, 
-      // effectively logging out since we clear localStorage keys.
-    } catch (e) {
-      console.error("Logout error", e);
+  const [exchangeInfo, setExchangeInfo] = useState({ cost: 0, gained: 0 });
+
+  const handleExchangeCurrency = () => {
+    const cost = 100;
+    if ((user.perfects || 0) >= cost) {
+      setUser(prev => ({
+        ...prev,
+        perfects: (prev.perfects || 0) - cost,
+        stars: (prev.stars || 0) + 10
+      }));
+      setExchangeInfo({ cost: 100, gained: 10 });
+      setShowExchangeSuccess(true);
+    } else {
+      setInsufficientFunds({ isOpen: true, currency: 'gold', required: 100 });
     }
-    // Hard reload to reset everything
-    window.location.reload();
   };
 
+
+
+
+  const handleWatchAd = () => {
+    setHearts(h => Math.min(MAX_HEARTS, h + 5));
+    // In a real app, this would trigger an ad
+    setShowResourceMenu(false);
+    alert("Ad Watched: +5 Hearts!"); // Feedback
+  };
+
+  const handleBuyShields = () => {
+    if (user.exp >= 250) {
+      setUser(previousUser => ({ ...previousUser, exp: previousUser.exp - 250 }));
+      setShields(s => s + 3);
+      setShowResourceMenu(false);
+      alert("Purchase Successful: +3 Shields!");
+    } else {
+      alert("Insufficient EXP! Need 250 EXP.");
+    }
+  };
 
   if (screen === 'landing') {
     return <>
@@ -308,6 +391,10 @@ const App: React.FC = () => {
           currentScreen={screen as any}
           setScreen={setScreen as any}
           hasAnalysis={!!currentPlaylist}
+          onExchange={handleExchangeCurrency}
+          onShowShop={() => setShowResourceMenu(true)}
+          hearts={hearts}
+          shields={shields}
         />
       )}
 
@@ -337,99 +424,20 @@ const App: React.FC = () => {
           <div className="h-full container mx-auto px-4 py-8 overflow-y-auto no-scrollbar relative">
             <div className="max-w-5xl mx-auto space-y-12">
               <section className="relative">
-                {/* Resource Bar & Shop */}
-                <div className="relative z-20 mb-8">
-                  <button
-                    onClick={() => setShowResourceMenu(!showResourceMenu)}
-                    className="w-full p-4 flex justify-center items-center  transition-all active:scale-[0.99] group"
-                  >
-                    <div className="flex items-center gap-6">
-                      <div className="flex items-center gap-3 bg-black/40 px-4 py-2 rounded-xl border border-white/5 group-hover:border-white/10 transition-colors">
-                        <span className="text-red-500 text-xl">❤️</span>
-                        <div className="flex flex-col items-start">
-                          <span className="text-white font-black italic text-lg leading-none">{hearts}</span>
-                          {hearts < MAX_HEARTS && (
-                            <span className="text-[10px] text-slate-500 font-bold tabular-nums">+{timeToNextHeart}s</span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3 bg-black/40 px-4 py-2 rounded-xl border border-white/5 group-hover:border-white/10 transition-colors">
-                        <span className="text-blue-500 text-xl">🛡️</span>
-                        <div className="flex flex-col items-start">
-                          <span className="text-white font-black italic text-lg leading-none">{shields}</span>
-                          <span className="text-[10px] text-slate-500 font-bold">SHIELDS</span>
-                        </div>
-                      </div>
-                    </div>
 
-                  </button>
-
-                  <div className={`absolute right-0 top-full mt-2 w-full sm:w-72 bg-[#1a1a1a] border border-white/10 rounded-xl shadow-2xl p-2 transition-all duration-200 origin-top-right overflow-hidden ${showResourceMenu ? 'opacity-100 visible translate-y-0' : 'opacity-0 invisible -translate-y-2 pointer-events-none'}`}>
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-3 py-2">Quick Refill</p>
-                    <div className="space-y-1">
-                      <button
-                        onClick={() => { setHearts(h => Math.min(MAX_HEARTS, h + 5)); setShowResourceMenu(false); }}
-                        className="w-full flex items-center justify-between p-3 hover:bg-white/5 rounded-lg group/item transition-colors text-left"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-red-500/20 flex items-center justify-center text-red-500">❤️</div>
-                          <div className="flex flex-col">
-                            <span className="text-white font-bold text-sm">+5 Hearts</span>
-                            <span className="text-xs text-slate-500">Watch Ad</span>
-                          </div>
-                        </div>
-                        <span className="text-green-400 text-xs font-black group-hover/item:translate-x-1 transition-transform">FREE</span>
-                      </button>
-
-                      <button
-                        onClick={() => { setShields(s => s + 3); setShowResourceMenu(false); }}
-                        className="w-full flex items-center justify-between p-3 hover:bg-white/5 rounded-lg group/item transition-colors text-left"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-500">🛡️</div>
-                          <div className="flex flex-col">
-                            <span className="text-white font-bold text-sm">+3 Shields</span>
-                            <span className="text-xs text-slate-500">250 EXP</span>
-                          </div>
-                        </div>
-                        <span className="text-white/40 text-xs font-black group-hover/item:text-white transition-colors">BUY</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-col md:flex-row md:items-end justify-between mb-10 gap-6">
-                  <div>
-                    <h2 className="text-4xl font-black flex items-center gap-4 italic uppercase tracking-tighter text-white">
-                      Vyb Tiles
-                    </h2>
-                    <p className="text-slate-500 text-sm mt-2">Deploy signals , Tap and Play.</p>
-                  </div>
-
-                  {history.length > 0 && (
-                    <button
-                      onClick={startEndlessMode}
-                      className="group relative px-8 py-4 bg-purple-600 hover:bg-purple-500 text-white rounded-2xl font-black italic uppercase tracking-tighter flex items-center gap-3 transition-all active:scale-95 border-b-4 border-purple-800 hover:border-purple-700 active:border-b-0 active:translate-y-1"
-                    >
-                      <svg className="w-6 h-6 fill-current animate-pulse" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
-                      Start Endless Run
-                    </button>
-                  )}
-                </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 pb-20">
                   <div className="lg:col-span-4 md:flex md:gap-6 lg:block">
                     <div className="flex-1 w-full">
-                      <FileUploader onUpload={handleFileUpload} isAnalyzing={isAnalyzing} />
+                      <FileUploader
+                        onUpload={handleFileUpload}
+                        isAnalyzing={isAnalyzing}
+                        userPerfects={user.perfects || 0}
+                        userStars={user.stars || 0}
+                        onDeductCurrency={(p, s) => setUser(prev => ({ ...prev, perfects: (prev.perfects || 0) - p, stars: (prev.stars || 0) - s }))}
+                      />
                     </div>
-                    <div className="mt-6 p-6 md:mt-0 lg:mt-6 flex-1 w-full">
-                      <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">Neural Buffer Status</h4>
-                      <div className="flex justify-between items-end">
-                        <span className="text-2xl font-black italic text-white leading-none">{history.filter(t => t.fileUrl).length}</span>
-                        <span className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">Active Signals</span>
-                      </div>
 
-                    </div>
                   </div>
                   <div className="lg:col-span-8">
                     <HistoryList history={history} onSelect={handlePlayFromHistory} onDelete={handleDeleteTrack} />
@@ -437,34 +445,67 @@ const App: React.FC = () => {
                 </div>
               </section>
             </div>
-          </div>
+          </div >
         )}
 
-        {screen === 'settings' && (
-          <Settings
-            onBack={() => setScreen('collection')}
-            user={user}
-            onUpdateProfile={handleUpdateProfile}
-            onLogout={handleLogout}
-            onUpgrade={handleUpgrade}
-          />
-        )}
+        {
+          screen === 'settings' && (
+            <Settings
+              onBack={() => setScreen('collection')}
+              user={user}
+              onUpdateProfile={handleUpdateProfile}
+              onLogout={handleLogout}
+              onUpgrade={handleUpgrade}
+            />
+          )
+        }
 
-        {screen === 'game' && currentPlaylist && (
-          <BeatGame
-            playlist={currentPlaylist}
-            onExit={() => setScreen('collection')}
-            globalHearts={hearts}
-            globalShields={shields}
-            onUseCurrency={handleUseCurrency}
-            onFinish={handleGameFinish}
-          />
-        )}
-      </main>
+        {
+          screen === 'game' && currentPlaylist && (
+            <BeatGame
+              playlist={currentPlaylist}
+              onExit={() => setScreen('collection')}
+              globalHearts={hearts}
+              globalShields={shields}
+              userPerfects={user.perfects || 0}
+              onUseCurrency={handleUseCurrency}
+              onFinish={handleGameFinish}
+              userLevel={user.level}
+              currentExp={user.exp}
+            />
+          )
+        }
+      </main >
 
       {/* Mobile Bottom Navigation */}
-      {screen !== 'game' && (
-        <BottomNav currentScreen={screen as any} setScreen={setScreen as any} />
+      {
+        screen !== 'game' && (
+          <BottomNav currentScreen={screen as any} setScreen={setScreen as any} />
+        )
+      }
+
+      <ExchangeSuccessModal
+        isOpen={showExchangeSuccess}
+        onClose={() => setShowExchangeSuccess(false)}
+        starsGained={exchangeInfo.gained}
+        cost={exchangeInfo.cost}
+      />
+      <ResourceShopModal
+        isOpen={showResourceMenu}
+        onClose={() => setShowResourceMenu(false)}
+        user={user}
+        onBuyShields={handleBuyShields}
+        onWatchAd={handleWatchAd}
+      />
+
+      {insufficientFunds && (
+        <InsufficientFundsModal
+          isOpen={insufficientFunds.isOpen}
+          onClose={() => setInsufficientFunds(null)}
+          currentBalance={insufficientFunds.currency === 'gold' ? (user.perfects || 0) : (user.stars || 0)}
+          requiredAmount={insufficientFunds.required}
+          currency={insufficientFunds.currency}
+        />
       )}
     </div>
   );

@@ -9,13 +9,13 @@ const slides = [
   {
     id: 'start',
     title: 'Vyb Tiles',
-    subtitle: 'High-Performance Rhythm Engine',
-    description: 'Transform any audio file into a high-fidelity interactive experience with local sync mapping.',
-    cta: 'Initialize'
+    subtitle: 'Gavena Presents',
+    description: 'Transform any audio file into a high-fidelity interactive experience with beat-synced rhythm challenge.',
+    cta: 'Get Started'
   },
   {
     id: 'identity',
-    title: 'User Identity',
+    title: 'Your Profile',
     subtitle: 'Operational Profile',
     description: 'Establish a local link to track performance and experience gains.',
     cta: 'Confirm Identity'
@@ -24,7 +24,7 @@ const slides = [
     id: 'legal',
     title: 'Legal Core',
     subtitle: 'Privacy & Rights',
-    description: 'All processing occurs locally on your device. We do not store or transmit your audio signals.',
+    description: 'All processing occurs locally on your device. Your music stays yours.',
     cta: 'Accept & Enter'
   }
 ];
@@ -53,7 +53,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onEnter }) => {
         {/* ...existing code... */}
         <div key={slide.id} className="animate-in fade-in slide-in-from-bottom-12 duration-1000 flex flex-col items-center">
           <p className="text-[12px] font-black text-slate-500 uppercase tracking-[0.8em] mb-4">{slide.subtitle}</p>
-          <h1 className="text-7xl sm:text-8xl font-black italic text-white tracking-tighter uppercase mb-8 leading-none">{slide.title}</h1>
+          <h1 className="text-8xl font-black italic tracking-tighter mb-4 text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-200 to-slate-400 drop-shadow-[0_0_15px_rgba(255,255,255,0.5)]">
+            VYB TAPS</h1>
           <p className="text-lg text-slate-400 font-medium max-w-2xl leading-relaxed mb-12">{slide.description}</p>
 
           {slide.id === 'identity' && (

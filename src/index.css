@@ -82,4 +82,53 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+
+  /* Fly-out Animations */
+  @keyframes fly-to-wallet-heart {
+    0% {
+      transform: translate(-50%, -50%) scale(1);
+      opacity: 1;
+    }
+
+    100% {
+      transform: translate(calc(-50% - 30vw), calc(-50% - 40vh)) scale(0.2);
+      opacity: 0;
+    }
+  }
+
+  .animate-fly-to-wallet-heart {
+    animation: fly-to-wallet-heart 1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  @keyframes fly-to-wallet-shield {
+    0% {
+      transform: translate(-50%, -50%) scale(1);
+      opacity: 1;
+    }
+
+    100% {
+      transform: translate(calc(-50% - 15vw), calc(-50% - 40vh)) scale(0.2);
+      opacity: 0;
+    }
+  }
+
+  .animate-fly-to-wallet-shield {
+    animation: fly-to-wallet-shield 1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  @keyframes fly-to-wallet-exp {
+    0% {
+      transform: translate(-50%, -50%) scale(1);
+      opacity: 1;
+    }
+
+    100% {
+      transform: translate(calc(-50% + 20vw), calc(-50% - 40vh)) scale(0.2);
+      opacity: 0;
+    }
+  }
+
+  .animate-fly-to-wallet-exp {
+    animation: fly-to-wallet-exp 1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
 }

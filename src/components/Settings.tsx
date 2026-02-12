@@ -27,7 +27,7 @@ export const Settings: React.FC<SettingsProps> = ({ onBack, user, onUpdateProfil
     if (navigator.share) {
       try {
         const shareData: ShareData = {
-          title: 'Vyb Tiles AI',
+          title: 'Vyb Taps AI',
           text: 'Check out this AI-powered rhythm game!',
         };
 
@@ -40,7 +40,7 @@ export const Settings: React.FC<SettingsProps> = ({ onBack, user, onUpdateProfil
         if (err.name === 'TypeError' && err.message?.includes('URL')) {
           try {
             await navigator.share({
-              title: 'Vyb Tiles AI',
+              title: 'Vyb Taps AI',
               text: 'Check out this AI-powered rhythm game!',
             });
             return;
@@ -73,7 +73,7 @@ export const Settings: React.FC<SettingsProps> = ({ onBack, user, onUpdateProfil
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
       ),
-      content: 'Vyb Tiles V2.5 is an experimental AI-powered rhythm engine built using Google Gemini Flash. It transforms static audio into dynamic gameplay in seconds.'
+      content: 'Vyb Taps V2.5 is an experimental AI-powered rhythm engine built using Google Gemini Flash. It transforms static audio into dynamic gameplay in seconds.'
     },
     {
       title: 'About Developer',

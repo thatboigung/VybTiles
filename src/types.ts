@@ -12,6 +12,7 @@ export interface AudioAnalysis {
   mood: string;
   summary: string;
   highlights: number[];
+  completion?: number; // Checkpoint: 0-100 percentage
 }
 
 export interface UserStats {
@@ -23,6 +24,8 @@ export interface UserStats {
   songsPlayed?: number;
   // Subscription
   isPro?: boolean;
+  perfects?: number;
+  stars?: number;
 }
 
 export type GameMode = 'classic' | 'dodge' | 'endless';

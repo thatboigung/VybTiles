@@ -54,8 +54,11 @@ interface BeatGameProps {
   onExit: () => void;
   globalHearts: number;
   globalShields: number;
-  onUseCurrency: (h: number, s: number) => void;
-  onFinish: (exp: number, sessionHearts: number, sessionShields: number) => void;
+  userPerfects: number;
+  onUseCurrency: (h: number, s: number, g: number) => void;
+  onFinish: (exp: number, sessionHearts: number, sessionShields: number, completion: number, sessionPerfects: number, difficulty: Level) => void;
+  userLevel: number;
+  currentExp: number;
 }
 
 type PowerUpType = 'shield' | 'life1' | 'life2' | 'none';
@@ -81,26 +84,40 @@ const StarIcon = ({ active, className }: { active: boolean; className?: string }
 );
 
 export const BeatGame: React.FC<BeatGameProps> = ({
-  playlist, onExit, globalHearts, globalShields, onUseCurrency, onFinish
+  playlist, onExit, globalHearts, globalShields, userPerfects, onUseCurrency, onFinish, userLevel, currentExp
 }) => {
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
   const [selectedMode, setSelectedMode] = useState<GameMode>(playlist.length > 1 ? 'endless' : 'classic');
   const [showTutorial, setShowTutorial] = useState(false);
-  const [countdown, setCountdown] = useState<number | null>(null);
+  // Removed countdown state
 
-  const [selectedLevel, setSelectedLevel] = useState<Level>('easy');
+  // Determine initial valid level
+  const getInitialLevel = (): Level => {
+    if (userLevel >= 5) return 'medium'; // Easy disabled
+    return 'easy';
+  };
+
+  const [selectedLevel, setSelectedLevel] = useState<Level>(getInitialLevel());
   const [isActive, setIsActive] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [isFlyoutAnimating, setIsFlyoutAnimating] = useState(false);
   const [isGameOver, setIsGameOver] = useState(false);
   const [isCleared, setIsCleared] = useState(false);
+  const [isFailing, setIsFailing] = useState(false);
+  const [isExiting, setIsExiting] = useState(false);
+  const [failedNoteId, setFailedNoteId] = useState<string | null>(null);
   const [showRechargeModal, setShowRechargeModal] = useState(false);
 
   const [score, setScore] = useState(0);
   const [laneHits, setLaneHits] = useState<number[]>(new Array(LANES).fill(0));
   const [combo, setCombo] = useState(0);
+  const [completion, setCompletion] = useState(0);
   const [maxCombo, setMaxCombo] = useState(0);
   const [sessionHearts, setSessionHearts] = useState(0);
   const [sessionShields, setSessionShields] = useState(0);
+  const [sessionPerfects, setSessionPerfects] = useState(0);
+  const [reviveCount, setReviveCount] = useState(0);
+  // @ts-ignore - activeLives used in logic but not render currently
   const [activeLives, setActiveLives] = useState(5);
   const [shake, setShake] = useState(0);
   const [playerLane, setPlayerLane] = useState(1);
@@ -140,15 +157,27 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     setTimeout(() => setFeedback(null), 600);
   };
 
-  const handleFailure = useCallback(() => {
-    if (invincible) return;
+  const handleFailure = useCallback((noteId?: string) => {
+    if (invincible || isFailing) return;
+
+    if (noteId) setFailedNoteId(noteId);
 
     setShake(10);
     setActiveLives(prev => {
       const next = prev - 1;
       if (next <= 0) {
-        setIsGameOver(true);
-        setIsActive(false);
+        setIsFailing(true);
+
+        // Calculate Completion based on Song Progress on Failure
+        if (durationRef.current > 0) {
+          const progress = (currentTimeRef.current / durationRef.current) * 100;
+          setCompletion(Math.floor(progress));
+        }
+
+        // Calculate Partial EXP
+        // Standard formula: Score / 100
+        const earned = Math.floor(score / 100);
+        setExpEarned(earned);
 
         if (audioRef.current) {
           const audio = audioRef.current;
@@ -184,21 +213,32 @@ export const BeatGame: React.FC<BeatGameProps> = ({
           };
           audioEffectRef.current = requestAnimationFrame(slowdown);
         }
+
+        // Delay Game Over Menu by 1s (Sync with audio slowdown)
+        setTimeout(() => {
+          setIsFailing(false);
+          setIsGameOver(true);
+          setIsActive(false);
+          setFailedNoteId(null);
+        }, 1000);
       }
       return next;
     });
 
     setInvincible(true);
     setTimeout(() => setInvincible(false), 2000);
-  }, [invincible]);
+  }, [invincible, isFailing]);
 
   const getNoteSpeed = () => {
+    // Base speed: Easy 400 (x1.0)
+    // Medium: 600 (x1.5)
+    // Hard: 800 (x2.0)
     const speeds: Record<Level, number> = { easy: 400, medium: 600, hard: 800 };
     return speeds[selectedLevel];
   };
 
   const handleHit = useCallback((lane: number, tapY?: number) => {
-    if (!isActive || isPaused || isGameOver || isCleared || countdown !== null) return;
+    if (!isActive || isPaused || isGameOver || isCleared) return;
     const t = audioRef.current?.currentTime || 0;
 
     setLaneHits(prev => {
@@ -257,15 +297,17 @@ export const BeatGame: React.FC<BeatGameProps> = ({
         if (diff < 0.05) {
           setScore(s => s + 1000 + combo * 50);
           setCombo(c => { const n = c + 1; setMaxCombo(m => Math.max(m, n)); return n; });
+          const bonus = combo >= 2 ? combo : 1;
+          setSessionPerfects(p => p + bonus);
           // Heavy shake for perfect hit
           setShake(10);
           showFeedback('PERFECT', 'text-yellow-400 drop-shadow-[0_0_15px_rgba(250,204,21,0.8)]', 1.5);
           spawnParticles(x, nY, '#facc15', 20); // Gold particles
         } else {
-          // GREAT: < 0.22s
-          const points = 300 + combo * 10;
+          // GREAT: < 0.22s (Non-Perfect Hit breaks Perfect Combo)
+          const points = 300;
           setScore(s => s + points);
-          setCombo(c => { const n = c + 1; setMaxCombo(m => Math.max(m, n)); return n; });
+          setCombo(0); // Reset combo if not perfect
           showFeedback('GREAT', 'text-cyan-400 drop-shadow-[0_0_10px_rgba(34,211,238,0.5)]', 1.2);
           spawnParticles(x, nY, '#22d3ee', 12); // Cyan particles
         }
@@ -274,12 +316,14 @@ export const BeatGame: React.FC<BeatGameProps> = ({
       // Missed tap (tapped empty space)
       // Strict rule: tapping empty space counts as failure
       setScore(s => Math.max(0, s - 200));
+      // No specific note ID for tapping empty space, or maybe find closest?
+      // For now, generic failure without specific note highlight if tapping void.
       handleFailure();
       setCombo(0);
       setShake(5);
       showFeedback('MISS', 'text-red-500 opacity-80', 0.9);
     }
-  }, [isActive, isPaused, isGameOver, isCleared, countdown, combo, selectedMode, handleFailure, selectedLevel]);
+  }, [isActive, isPaused, isGameOver, isCleared, combo, selectedMode, handleFailure, selectedLevel]);
 
   const loadTrackNotes = (analysis: AudioAnalysis) => {
     notesRef.current = analysis.beats.flatMap((beatTime, index) => {
@@ -305,14 +349,23 @@ export const BeatGame: React.FC<BeatGameProps> = ({
         powerUp: powerType
       }];
 
-      // Double Tile Chance (25% in tapping modes)
-      if (selectedMode !== 'dodge' && Math.random() < 0.25) {
+      // Calculate song duration approximation (last beat)
+      const lastBeat = analysis.beats.length > 0 ? analysis.beats[analysis.beats.length - 1] : 0;
+      const isLateGame = lastBeat > 0 && beatTime > (lastBeat * 0.6);
+
+      // Dynamic Difficulty:
+      // - Normal: 25% double tile chance
+      // - Late Game (>60%): 60% double tile chance (Climax)
+      const doubleTileChance = isLateGame ? 0.6 : 0.25;
+
+      // Double Tile Chance
+      if (selectedMode !== 'dodge' && Math.random() < doubleTileChance) {
         let lane2 = Math.floor(Math.random() * LANES);
         while (lane2 === lane1) lane2 = Math.floor(Math.random() * LANES);
 
         notes.push({
           id: `${analysis.id}-n-${index}-b`,
-          time: beatTime,
+          time: beatTime + 0.15, // Sequential offset for stream effect
           lane: lane2,
           hit: false,
           missed: false,
@@ -341,9 +394,51 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     };
   };
 
+  const rampAudioToSpeed = useCallback((targetSpeed: number = 1.0, duration: number = 3000) => {
+    if (!audioRef.current) return;
+
+    // Cancel any active effect
+    if (audioEffectRef.current !== null) {
+      cancelAnimationFrame(audioEffectRef.current);
+      audioEffectRef.current = null;
+    }
+
+    const audio = audioRef.current;
+
+    // Start slow
+    const startRate = 0.2;
+    audio.playbackRate = startRate;
+    (audio as any).preservesPitch = true;
+
+    audio.play().catch(e => console.error("Play blocked", e));
+
+    const startTime = performance.now();
+
+    const rampUp = (now: number) => {
+      // Stop if paused or game over (checking refs or DOM state is safer than closed-over state)
+      if (audio.paused) {
+        audioEffectRef.current = null;
+        return;
+      }
+
+      const elapsed = now - startTime;
+      if (elapsed < duration) {
+        const progress = elapsed / duration;
+        const currentRate = startRate + (targetSpeed - startRate) * progress;
+        audio.playbackRate = currentRate;
+        audioEffectRef.current = requestAnimationFrame(rampUp);
+      } else {
+        audio.playbackRate = targetSpeed;
+        audioEffectRef.current = null;
+      }
+    };
+
+    audioEffectRef.current = requestAnimationFrame(rampUp);
+  }, []);
+
   const actuallyStartGame = () => {
     const { shieldCost } = checkCanAfford();
-    onUseCurrency(2, shieldCost);
+    onUseCurrency(2, shieldCost, 0);
 
     setActiveLives(selectedMode === 'endless' ? 1 : livesMap[selectedLevel]);
 
@@ -351,31 +446,18 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     loadTrackNotes(playlist[0]);
     particlesRef.current = [];
 
-    setScore(0); setCombo(0); setMaxCombo(0); setSessionHearts(0); setSessionShields(0); setPlayerLane(1);
+    setScore(0); setCombo(0); setMaxCombo(0); setSessionHearts(0); setSessionShields(0); setSessionPerfects(0); setPlayerLane(1);
     setIsActive(true); setIsPaused(false); setIsGameOver(false); setIsCleared(false); setInvincible(false);
 
-    setCountdown(3);
+    // Immediate Start with Slow Motion Ramp
+    if (audioRef.current) {
+      audioRef.current.src = playlist[0].fileUrl || '';
+      audioRef.current.currentTime = 0;
+      rampAudioToSpeed(1.0, 3000);
+    }
   };
 
-  useEffect(() => {
-    if (countdown === null) return;
-    if (countdown > 0) {
-      const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
-      return () => clearTimeout(timer);
-    } else {
-      const timer = setTimeout(() => {
-        setCountdown(null);
-        if (audioRef.current) {
-          audioRef.current.playbackRate = 1;
-          (audioRef.current as any).preservesPitch = true;
-          audioRef.current.src = playlist[0].fileUrl || '';
-          audioRef.current.currentTime = 0;
-          audioRef.current.play().catch(e => console.error("Audio play blocked", e));
-        }
-      }, 500);
-      return () => clearTimeout(timer);
-    }
-  }, [countdown, playlist]);
+  // Removed Countdown Effect
 
   const startGame = () => {
     const { canAfford } = checkCanAfford();
@@ -405,11 +487,15 @@ export const BeatGame: React.FC<BeatGameProps> = ({
         audioRef.current.play();
       }
     } else {
-      // Significantly increased EXP formula: (score / 10) + 500 base
-      const earned = Math.floor(score / 10) + 500;
+      // EXP Formula: 10000 points = 100 EXP (ratio 100:1)
+      const earned = Math.floor(score / 100);
       setExpEarned(earned);
       setIsCleared(true);
       if (audioRef.current) audioRef.current.pause();
+
+      // Calculate Completion based on Song Progress (Time Elapsed)
+      // On finish, it's 100%
+      setCompletion(100);
 
       const durationAnim = 1000;
       const startTime = performance.now();
@@ -424,8 +510,60 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   };
 
   const exitSession = () => {
-    onFinish(expEarned, sessionHearts, sessionShields);
-    onExit();
+    setIsExiting(true);
+    // Delay unmount to allow exit animation
+    setTimeout(() => {
+      onFinish(expEarned, sessionHearts, sessionShields, completion, sessionPerfects, selectedLevel);
+      onExit();
+    }, 200);
+  };
+
+  const handleAbort = () => {
+    setIsExiting(true);
+    setTimeout(onExit, 200);
+  };
+
+  // Define exitSession implicitly if it was missing/misnamed or verify usage. 
+  // Since I couldn't find it, I'll alias it to handleAbort or similar for safety in my new function, 
+  // but looking at existing usage, it's expected to be there. 
+  // I will just use onExit in my new function to be safe.
+  const handleClaimAwards = () => {
+    setIsFlyoutAnimating(true);
+    // Trigger save immediately or before exit? 
+    // Let's do it before exit to ensure we have the data
+    setTimeout(() => {
+      onFinish(expEarned, sessionHearts, sessionShields, completion, sessionPerfects, selectedLevel);
+      setIsExiting(true);
+      setTimeout(onExit, 200);
+    }, 1500); // Wait for flyout animation
+  };
+
+  const handleRevive = () => {
+    // Revive Cost: 50 * (reviveCount + 1) Gold + 2 Shields
+    const goldCost = 50 * (reviveCount + 1);
+    const shieldCost = 2;
+
+    if (userPerfects >= goldCost && globalShields >= shieldCost) {
+      onUseCurrency(0, shieldCost, goldCost);
+      setReviveCount(prev => prev + 1);
+
+      // Cancel audio slowdown effect
+      if (audioEffectRef.current !== null) {
+        cancelAnimationFrame(audioEffectRef.current);
+        audioEffectRef.current = null;
+      }
+
+      setIsGameOver(false);
+      setIsActive(true);
+      setActiveLives(1); // Start with 1 shield
+
+      // Resume audio with slow motion ramp
+      rampAudioToSpeed(1.0, 3000);
+
+      // Brief invincibility
+      setInvincible(true);
+      setTimeout(() => setInvincible(false), 3000);
+    }
   };
 
   const restartSession = () => {
@@ -465,8 +603,12 @@ export const BeatGame: React.FC<BeatGameProps> = ({
       }
 
       const t = audioRef.current?.currentTime || 0;
-      currentTimeRef.current = t;
-      const progress = t / (durationRef.current || 1);
+      // Freeze time visually if failing
+      if (!isFailing) {
+        currentTimeRef.current = t;
+      }
+      const displayTime = isFailing ? currentTimeRef.current : t;
+      const progress = displayTime / (durationRef.current || 1);
 
       if (progressBarRef.current) {
         progressBarRef.current.style.width = `${progress * 100}%`;
@@ -477,10 +619,23 @@ export const BeatGame: React.FC<BeatGameProps> = ({
       if (shake > 0) setShake(s => Math.max(0, s - 2));
 
       ctx.save();
-      ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+      // Glitch effect: intense shake and color shifts during failure
+      const currentShake = isFailing ? 20 : shake;
+      ctx.translate((Math.random() - 0.5) * currentShake, (Math.random() - 0.5) * currentShake);
+
       ctx.clearRect(0, 0, w, h);
       ctx.fillStyle = '#0a0a0a';
       ctx.fillRect(0, 0, w, h);
+
+      // Rewind Logic during failure
+      if (isFailing && failedNoteId) {
+        const failedNote = notesRef.current.find(n => n.id === failedNoteId);
+        if (failedNote) {
+          // Smoothly rewind time to the failed note's time
+          // Lerp factor 0.1 for smooth slide back
+          currentTimeRef.current = currentTimeRef.current + (failedNote.time - currentTimeRef.current) * 0.1;
+        }
+      }
 
       const now = Date.now();
       for (let i = 0; i < LANES; i++) {
@@ -512,7 +667,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
       // Render Connectors for simultaneous tiles (Double Tiles)
       // Group by time
-      const visibleNotes = notesRef.current.filter(n => !n.hit && !n.missed && (n.time - t) <= visibleRangeSeconds && (n.time - t) >= -0.15);
+      const visibleNotes = notesRef.current.filter(n => !n.hit && !n.missed && (n.time - displayTime) <= visibleRangeSeconds && (n.time - displayTime) >= -0.15);
       const timeGroups = new Map<number, Note[]>();
       visibleNotes.forEach(n => {
         if (!timeGroups.has(n.time)) timeGroups.set(n.time, []);
@@ -521,7 +676,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
       timeGroups.forEach((group) => {
         if (group.length > 1 && selectedMode !== 'dodge') {
-          const y = targetY - ((group[0].time - t) * speed);
+          const y = targetY - ((group[0].time - displayTime) * speed);
           if (y > -200 && y < h + 200) {
             // Find min and max x
             let minX = w, maxX = 0;
@@ -556,7 +711,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
             if (now - partner.hitTimestamp > 300) {
               note.missed = true;
               setScore(s => Math.max(0, s - 300));
-              handleFailure();
+              handleFailure(note.id);
               showFeedback('SYNC FAIL', 'text-red-500', 1.0);
               return;
             }
@@ -565,14 +720,14 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
         if (note.hit) return;
 
-        const timeDiff = note.time - t;
+        const timeDiff = note.time - displayTime;
         if (timeDiff > visibleRangeSeconds) return;
-        if (timeDiff < -0.15) { // Reduced threshold for missing tiles
+        if (timeDiff < -0.15 && !isFailing) { // Reduced threshold for missing tiles
           if (selectedMode !== 'dodge' && !note.hit && !note.missed) {
             note.missed = true;
             setScore(s => Math.max(0, s - 500)); // Penalty for skipping
             setCombo(0);
-            handleFailure();
+            handleFailure(note.id);
             showFeedback('MISS', 'text-red-500', 1.0);
           } else if (selectedMode === 'dodge' && !note.hit && !note.missed && note.type === 'obstacle') {
             // Dodge success: Obstacle passed without hit
@@ -590,7 +745,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
           const playerY = h * (TARGET_Y_RATIO - 0.1);
           if (Math.abs(y - playerY) < 45 && note.lane === playerLane) {
             note.hit = true;
-            if (note.type === 'obstacle') handleFailure();
+            if (note.type === 'obstacle') handleFailure(note.id);
             else if (note.type === 'powerup') {
               if (note.powerUp === 'shield') setSessionShields(s => s + 1);
               else setSessionHearts(h => h + (note.powerUp === 'life1' ? 1 : 2));
@@ -605,14 +760,23 @@ export const BeatGame: React.FC<BeatGameProps> = ({
           const nW = lW * 0.92, nH = 150;
 
           ctx.save();
-          if (note.type === 'tile') {
+
+          // Flash effect for failed note
+          if (isFailing && note.id === failedNoteId) {
+            const flash = Math.sin(Date.now() / 50); // Fast blink
+            ctx.shadowColor = flash > 0 ? 'red' : 'transparent';
+            ctx.shadowBlur = 30;
+            ctx.fillStyle = flash > 0 ? '#ff0000' : '#ffffff';
+          } else if (note.type === 'tile') {
             ctx.shadowBlur = 10;
             ctx.shadowColor = 'rgba(255,255,255,0.2)';
           }
 
           ctx.beginPath();
           ctx.roundRect(x - nW / 2, y - nH / 2, nW, nH, 4);
-          if (note.type === 'powerup') {
+          if (isFailing && note.id === failedNoteId) {
+            ctx.fill(); // Already set style above
+          } else if (note.type === 'powerup') {
             ctx.fillStyle = note.powerUp === 'shield' ? '#2563eb' : '#16a34a'; ctx.fill();
             ctx.fillStyle = 'white'; ctx.font = 'bold 18px Inter'; ctx.textAlign = 'center';
             ctx.fillText(note.powerUp === 'shield' ? '🛡️' : '❤️', x, y + 6);
@@ -652,7 +816,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   // Keyboard Controls
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (countdown !== null || isPaused || isGameOver || isCleared) return;
+      if (isPaused || isGameOver || isCleared || isFailing) return;
 
       if (selectedMode === 'dodge') {
         if (e.code === 'ArrowLeft') {
@@ -680,10 +844,15 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedMode, countdown, isPaused, isGameOver, isCleared, handleHit]);
+  }, [selectedMode, isPaused, isGameOver, isCleared, handleHit]);
 
   const onPointerDown = (e: React.PointerEvent) => {
-    if (countdown !== null) return;
+    if (isFailing) return;
+
+    // Check if target is a button or inside a button (e.g. Pause, Resume)
+    const target = e.target as HTMLElement;
+    if (target.closest('button')) return;
+
     isDraggingRef.current = true;
     const r = gameAreaRef.current?.getBoundingClientRect();
     if (r) {
@@ -701,7 +870,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
-    if (isDraggingRef.current && selectedMode === 'dodge' && countdown === null) {
+    if (isDraggingRef.current && selectedMode === 'dodge') {
       const r = gameAreaRef.current?.getBoundingClientRect();
       if (r) {
         const l = Math.max(0, Math.min(LANES - 1, Math.floor((e.clientX - r.left) / (r.width / LANES))));
@@ -733,39 +902,38 @@ export const BeatGame: React.FC<BeatGameProps> = ({
           onClose={() => setShowRechargeModal(false)}
         />
 
-        <div ref={gameAreaRef} className="relative w-full max-w-[450px] h-full bg-[#0a0a0a] border-x border-white/5 overflow-hidden shadow-[0_0_100px_rgba(0,0,0,1)]">
+        <div ref={gameAreaRef} className={`relative w-full max-w-[450px] h-full bg-[#0a0a0a] overflow-hidden 
+          animate-in fade-in zoom-in-95 duration-200 
+          ${isExiting ? 'animate-out fade-out zoom-out-95 duration-200 fill-mode-forwards' : ''}
+        `}>
 
           {/* HUD */}
           <div className="absolute top-0 left-0 right-0 p-4 z-50 pointer-events-none flex flex-col gap-4">
-            <div className="flex justify-between items-start gap-3">
-              <div className="flex-1 bg-black/60 backdrop-blur-xl border border-white/10 p-3 rounded-2xl pointer-events-auto flex items-center justify-between shadow-2xl">
-                <div className="flex flex-col gap-1.5">
-                  {selectedMode === 'endless' ? (
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-blue-500 text-lg">🛡️</span>
-                      <span className="text-white font-black italic text-lg">{globalShields}</span>
-                    </div>
-                  ) : (
-                    <div className="flex gap-1">
-                      {Array.from({ length: activeLives }).map((_, i) => <span key={i} className="text-blue-500 text-[10px]">🛡️</span>)}
-                    </div>
-                  )}
-                  <div className="text-xl font-black text-white italic tabular-nums tracking-tighter leading-none">{score.toLocaleString()}</div>
+            <div className="flex justify-between items-start gap-4">
+              <div className="flex-1 flex flex-col gap-1">
+                {/* Score Display (Minimal) */}
+                <div className="flex flex-col items-start bg-black/40 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/5 shadow-xl w-fit">
+                  <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest leading-none mb-0.5">Score</span>
+                  <div className="text-2xl font-black text-white italic tabular-nums tracking-tighter leading-none">{score.toLocaleString()}</div>
                 </div>
 
-                <div className="flex items-center gap-4 bg-white/5 px-3 py-1.5 rounded-xl border border-white/5">
-                  <div className="flex flex-col items-center">
-                    <span className="text-[8px] font-black text-white/30 uppercase tracking-widest mb-0.5">Hearts</span>
-                    <span className="text-sm font-black text-green-500 italic">+{sessionHearts}</span>
-                  </div>
-                  <div className="w-px h-6 bg-white/10"></div>
-                  <div className="flex flex-col items-center">
-                    <span className="text-[8px] font-black text-white/30 uppercase tracking-widest mb-0.5">Shields</span>
-                    <span className="text-sm font-black text-blue-500 italic">+{sessionShields}</span>
-                  </div>
+                {/* Gold / Perfects Display */}
+                <div className="flex items-center gap-2 bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/5 w-fit mt-1">
+                  <div className="w-1.5 h-1.5 rounded-full bg-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.6)]"></div>
+                  <span className="text-xs font-black text-yellow-100 tabular-nums tracking-tight">{sessionPerfects.toLocaleString()} <span className="text-[9px] text-yellow-500/80 ml-0.5">GOLD</span></span>
                 </div>
               </div>
-              <button onClick={() => { setIsPaused(true); audioRef.current?.pause(); }} className="w-12 h-12 bg-black/60 border border-white/10 flex items-center justify-center pointer-events-auto rounded-2xl text-white shadow-xl hover:bg-white/10 transition-colors">
+
+              {/* Combo Display (Centered/Right aligned dynamically) */}
+              {combo > 1 && (
+                <div className="absolute top-16 left-1/2 -translate-x-1/2 flex flex-col items-center animate-in zoom-in-50 slide-in-from-bottom-2 fade-in duration-200">
+                  <span className="text-5xl font-black text-white italic leading-none drop-shadow-[0_0_15px_rgba(255,255,255,0.3)] tracking-tighter">{combo}</span>
+                  <span className="text-[10px] font-black text-transparent bg-clip-text bg-gradient-to-t from-slate-400 to-white uppercase tracking-[0.3em]">COMBO</span>
+                </div>
+              )}
+
+              {/* Pause Button */}
+              <button onClick={() => { setIsPaused(true); audioRef.current?.pause(); }} className="w-10 h-10 bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center pointer-events-auto rounded-xl text-white/70 hover:text-white hover:bg-white/10 transition-all active:scale-95">
                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
               </button>
             </div>
@@ -799,126 +967,299 @@ export const BeatGame: React.FC<BeatGameProps> = ({
           <canvas ref={canvasRef} width={450} height={800} className="w-full h-full" />
 
           {/* Countdown Overlay */}
-          {countdown !== null && (
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[115]">
-              <div className="text-8xl font-black italic text-white animate-ping">
-                {countdown === 0 ? 'GO!' : countdown}
-              </div>
-            </div>
-          )}
-
-          {/* Start Overlay */}
-          {!isActive && !isCleared && !isGameOver && countdown === null && (
+          {/* Countdown removed */}    {/* Start Overlay */}
+          {!isActive && !isCleared && !isGameOver && (
             <div className="absolute inset-0 bg-[#0a0a0a]/95 flex flex-col items-center justify-center p-8 z-[110] text-center">
-              <h2 className="text-4xl font-black italic text-white uppercase tracking-tighter mb-4">{playlist.length > 1 ? 'Endless Protocol' : 'Archives Access'}</h2>
 
-              {/* Resource Status */}
-              <div className="flex gap-4 mb-8 bg-white/5 p-3 rounded-2xl border border-white/10">
-                <div className="flex flex-col items-center min-w-[60px]">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-black text-green-500">❤️ {globalHearts}</span>
-                    <span className="text-sm font-black text-blue-500">🛡️ {globalShields}</span>
+              {/* Top Wallet Bar */}
+              <div className="absolute top-0 left-0 right-0 p-6 flex justify-between items-start">
+                <button onClick={handleAbort} className="text-xs font-black text-slate-500 uppercase tracking-widest hover:text-white transition-colors flex items-center gap-2 group">
+                  <span className="group-hover:-translate-x-1 transition-transform">←</span> ABORT
+                </button>
+                <div className="flex gap-4">
+                  <div className="flex flex-col items-end">
+
+                    <div className="flex items-center gap-3 bg-white/5 px-3 py-1.5 rounded-full border border-white/10">
+                      <span className="text-sm font-black text-white">{globalHearts} <span className="text-xs text-red-500">❤️</span></span>
+                      <div className="w-px h-3 bg-white/10"></div>
+                      <span className="text-sm font-black text-white">{globalShields} <span className="text-xs text-blue-500">🛡️</span></span>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div className="w-full max-w-xs space-y-6">
-                <div className="space-y-4">
-                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Game Mode</p>
-                  <div className="flex gap-2 p-1 bg-white/5 border border-white/10 rounded-xl">
-                    {['classic', 'dodge', 'endless'].map(m => (
-                      <button key={m} onClick={() => setSelectedMode(m as any)} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${selectedMode === m ? 'bg-white text-black' : 'text-slate-500'}`}>{m}</button>
-                    ))}
+              {/* Kinetic Typography Title */}
+              <div key={selectedMode} className="mb-12 animate-in fade-in zoom-in-95 duration-500">
+                <h2 className="text-5xl font-black italic text-white uppercase tracking-tighter " style={{ textShadow: '0 0 30px rgba(255,255,255,0.1)' }}>
+                  {selectedMode === 'endless' ? 'Endless Protocol' : 'Start Game'}
+                </h2>
+                <div className="h-1 w-24 bg-gradient-to-r from-transparent via-purple-500 to-transparent mx-auto mt-4 rounded-full opacity-50"></div>
+              </div>
+
+              <div className="w-full max-w-xs space-y-8">
+                <div className="space-y-5">
+                  <div className="space-y-2">
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest text-left pl-1">Game Mode</p>
+                    <div className="flex gap-2 p-1 bg-white/5 border border-white/10 rounded-xl">
+                      {['classic', 'dodge', 'endless'].map(m => (
+                        <button key={m} onClick={() => setSelectedMode(m as any)} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${selectedMode === m ? 'bg-white text-black shadow-lg scale-105' : 'text-slate-500 hover:text-slate-300'}`}>{m}</button>
+                      ))}
+                    </div>
                   </div>
-                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Threat Level</p>
-                  <div className="flex gap-2 p-1 bg-white/5 border border-white/10 rounded-xl">
-                    {['easy', 'medium', 'hard'].map(l => (
-                      <button key={l} onClick={() => setSelectedLevel(l as any)} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${selectedLevel === l ? 'bg-white text-black' : 'text-slate-500'}`}>{l}</button>
-                    ))}
+
+                  <div className="space-y-2">
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest text-left pl-1">Difficulty</p>
+                    <div className="flex gap-2 p-1 bg-white/5 border border-white/10 rounded-xl">
+                      {['easy', 'medium', 'hard'].map(level => {
+                        const l = level as Level;
+                        let isLocked = false;
+                        let lockReason = "";
+
+                        if (l === 'easy' && userLevel >= 5) {
+                          isLocked = true;
+                          lockReason = "Max Level Exceeded";
+                        } else if (l === 'medium' && userLevel < 3) {
+                          isLocked = true;
+                          lockReason = "Unlock at Lv.3";
+                        } else if (l === 'hard' && userLevel < 5) { // Assuming Hard unlocks at Lv 5
+                          isLocked = true;
+                          lockReason = "Unlock at Lv.5";
+                        }
+
+                        return (
+                          <button
+                            key={l}
+                            onClick={() => !isLocked && setSelectedLevel(l)}
+                            disabled={isLocked}
+                            className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all relative overflow-hidden
+                              ${selectedLevel === l
+                                ? 'bg-white text-black shadow-lg scale-105 z-10'
+                                : isLocked
+                                  ? 'bg-zinc-900/50 text-zinc-700 cursor-not-allowed border border-white/5'
+                                  : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'
+                              }`}
+                          >
+                            <span className={isLocked ? 'opacity-0' : ''}>{l}</span>
+                            {isLocked && (
+                              <div className="absolute inset-0 flex items-center justify-center bg-black/80">
+                                <span className="text-[7px] text-zinc-500 font-bold leading-tight px-1">{lockReason || "LOCKED"}</span>
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <button onClick={startGame} className="w-full py-5 bg-white text-black font-black text-xl italic uppercase rounded-xl shadow-2xl hover:scale-[1.02] active:scale-95 transition-all flex flex-col items-center justify-center gap-1">
-                    <span>Initialize</span>
-
-                  </button>
-                  {(!checkCanAfford().canAfford) && (
-                    <p className="text-xs text-red-500 font-bold uppercase animate-pulse">Insufficient Resources</p>
-                  )}
+                <div className="space-y-2 pt-4">
+                  {(() => {
+                    const { canAfford } = checkCanAfford();
+                    return (
+                      <button
+                        onClick={canAfford ? startGame : undefined}
+                        className={`w-full py-5 font-black text-xl italic uppercase rounded-2xl transition-all flex flex-col items-center justify-center gap-1 shadow-2xl
+                          ${canAfford
+                            ? "bg-white text-black hover:scale-[1.02] active:scale-95"
+                            : "bg-red-900/20 text-red-500 border border-red-500/30 cursor-not-allowed"
+                          }`}
+                      >
+                        <span>{canAfford ? "" : "Insufficient Resources"}</span>
+                        <svg className="w-6 h-6 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M8 5v14l11-7z" />
+                        </svg>
+                      </button>
+                    );
+                  })()}
                 </div>
-
-                <button onClick={onExit} className="w-full text-[10px] font-black text-slate-600 uppercase tracking-widest mt-4 hover:text-white transition-colors">Abort Sync</button>
               </div>
             </div>
           )}
 
           {/* Results/Overlays */}
           {isGameOver && (
-            <div className="absolute inset-0 bg-black/80  backdrop-blur-sm flex flex-col items-center justify-center p-10 z-[120]">
-              <div className=" p-10 rounded-2xl text-center w-full max-w-sm shadow-2xl">
-                <h3 className="text-3xl font-black italic text-red-500 uppercase mb-2">Signal Failed</h3>
-                <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest mb-8">
-                  Wallet: {globalHearts}❤️ {globalShields}🛡️
-                </p>
+            <div className="absolute inset-0 backdrop-blur-xl flex flex-col items-center justify-end pb-24 md:justify-center md:pb-0 z-[120] animate-in fade-in duration-300">
+              <div className="p-8 rounded-2xl text-center w-full max-w-sm ring-1 ring-white/5 relative overflow-hidden animate-in slide-in-from-bottom-10 duration-300">
+                {/* Decorative glow */}
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-32 bg-red-500/10 rounded-full blur-[50px] pointer-events-none"></div>
 
-                <div className="space-y-3">
-                  <button onClick={restartSession} className="w-full py-5 bg-white text-black font-black text-lg uppercase italic rounded-xl shadow-xl hover:scale-105 active:scale-95 transition-all flex flex-col items-center justify-center">
-                    <span>Retry Sync</span>
+                <h3 className="text-4xl font-black italic text-red-500 uppercase mb-6 tracking-tighter drop-shadow-[0_0_15px_rgba(239,68,68,0.5)] relative z-10 animate-pulse">Game Over</h3>
+
+                {/* Stats Grid - Unified with Success Screen */}
+                <div className="w-full bg-white/5 rounded-2xl p-6 mb-6 border border-white/5 relative z-10">
+                  <div className="grid grid-cols-2 gap-6 text-center">
+                    <div>
+                      <p className="text-[9px] font-black text-slate-500 uppercase mb-1 tracking-widest">Salvage</p>
+                      <div className="flex flex-col gap-1">
+                        <span className="text-xl font-black text-white italic">+{sessionHearts}<span className="text-red-500 text-lg ml-0.5">❤️</span></span>
+                        <span className="text-xl font-black text-white italic">+{sessionShields}🛡️</span>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-black text-slate-500 uppercase mb-1 tracking-widest">Growth</p>
+                      <span className="text-2xl font-black text-white italic">+{expEarned} <span className="text-xs text-slate-500 ml-0.5">EXP</span></span>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 pt-4 border-t border-white/5 text-center">
+                    <p className="text-[9px] font-black text-slate-500 uppercase mb-1 tracking-widest">Completion</p>
+                    <span className="text-lg font-black text-purple-400 italic">{completion}%</span>
+                  </div>
+                </div>
+
+                <div className="space-y-4 relative z-10">
+                  {/* Revive Button */}
+                  {(() => {
+                    const goldCost = 50 * (reviveCount + 1);
+                    const canAffordRevive = userPerfects >= goldCost && globalShields >= 2;
+
+                    return (
+                      <button
+                        onClick={handleRevive}
+                        disabled={!canAffordRevive}
+                        className={`w-full py-4 font-black text-lg uppercase italic rounded-xl transition-all flex items-center justify-center gap-2 border-2
+                          ${canAffordRevive
+                            ? "bg-yellow-600 text-white border-yellow-400 shadow-[0_0_15px_rgba(234,179,8,0.5)] hover:scale-105 active:scale-95"
+                            : "bg-zinc-800 text-zinc-600 border-zinc-700 cursor-not-allowed opacity-50"
+                          }`}
+                      >
+                        <span>Revive</span>
+                        <span className="text-xs font-normal opacity-80 bg-black/20 px-2 py-0.5 rounded">
+                          {goldCost} Gold + 2🛡️
+                        </span>
+                      </button>
+                    );
+                  })()}
+
+                  {(() => {
+                    const { canAfford, shieldCost } = checkCanAfford();
+                    return (
+                      <button
+                        onClick={canAfford ? restartSession : undefined}
+                        disabled={!canAfford}
+                        className={`w-full py-5 font-black text-xl uppercase italic rounded-xl transition-all flex flex-col items-center justify-center gap-1 border-2
+                          ${canAfford
+                            ? "bg-white text-black border-white shadow-[4px_4px_0_0_#333] hover:shadow-[6px_6px_0_0_#333] hover:-translate-y-0.5 active:translate-y-[2px] active:shadow-none active:scale-95"
+                            : "bg-zinc-800 text-zinc-600 border-zinc-700 cursor-not-allowed opacity-80"
+                          }`}
+                        style={canAfford ? { animation: `rhythmic-pulse ${60 / (playlist[currentTrackIndex]?.bpm || 128)}s ease-in-out infinite` } : {}}
+                      >
+                        <span>{canAfford ? "Retry Sync" : "Low Signal"}</span>
+                        <span className="text-[9px] opacity-60 tracking-widest font-normal">
+                          {canAfford ? `COST: 2❤️ ${shieldCost}🛡️` : "INSUFFICIENT ENERGY"}
+                        </span>
+                      </button>
+                    );
+                  })()}
+
+                  <button
+                    onClick={handleClaimAwards}
+                    className="w-full py-4 text-zinc-400 font-black text-xs uppercase italic tracking-widest bg-transparent border-2 border-white/5 rounded-xl hover:text-white hover:border-white/20 transition-all active:scale-95 group"
+                  >
+                    <span className="group-hover:translate-x-1 transition-transform inline-block">Claim & Exit</span>
                   </button>
-                  <button onClick={exitSession} className="w-full py-3  text-slate-500 font-black text-xs uppercase italic rounded-xl hover:text-white transition-colors">Abort archives</button>
                 </div>
               </div>
             </div>
           )}
 
           {isCleared && (
-            <div className="absolute inset-0 bg-black/95 backdrop-blur-md flex flex-col items-center justify-center p-10 z-[130]">
-              <div className="w-full max-w-sm  p-10 rounded-2xl flex flex-col items-center shadow-2xl">
-                <div className="flex gap-2 mb-4">
-                  <StarIcon active={true} className="w-8 h-8" />
-                  <StarIcon active={true} className="w-10 h-10 -translate-y-2" />
-                  <StarIcon active={true} className="w-8 h-8" />
-                </div>
-                <h3 className="text-4xl font-black italic text-yellow-400 uppercase mb-8 tracking-tighter">Sync Success</h3>
+            <div className="absolute inset-0 backdrop-blur-xl flex flex-col items-center justify-center p-6 z-[130] animate-in fade-in duration-300">
+              <div className="w-full max-w-sm  p-8 rounded-2xl flex flex-col items-center shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-300">
+                {/* Decorative glow */}
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-32 bg-yellow-500/10 rounded-full blur-[50px] pointer-events-none"></div>
 
-                <div className="w-full bg-white/5 rounded-2xl p-6 mb-8 border border-white/10">
+                <div className="flex gap-2 mb-6 relative z-10">
+                  <StarIcon active={true} className="w-8 h-8 drop-shadow-[0_0_10px_rgba(234,179,8,0.5)]" />
+                  <StarIcon active={true} className="w-10 h-10 -translate-y-2 drop-shadow-[0_0_15px_rgba(234,179,8,0.6)]" />
+                  <StarIcon active={true} className="w-8 h-8 drop-shadow-[0_0_10px_rgba(234,179,8,0.5)]" />
+                </div>
+                <h3 className="text-4xl font-black italic text-yellow-500 uppercase mb-8 tracking-tighter drop-shadow-[0_0_15px_rgba(234,179,8,0.4)] relative z-10 animate-jump-in">Sync Success</h3>
+
+                <div className="w-full bg-white/5 rounded-2xl p-6 mb-8 border border-white/5 relative z-10">
                   <div className="grid grid-cols-2 gap-6 text-center">
                     <div>
                       <p className="text-[9px] font-black text-slate-500 uppercase mb-1 tracking-widest">Rewards</p>
                       <div className="flex flex-col gap-1">
-                        <span className="text-xl font-black text-green-500 italic">+{sessionHearts + 1}❤️</span>
-                        <span className="text-[10px] font-bold text-white/50 tracking-tighter">(Bonus Heart Included)</span>
+                        <span className="text-2xl font-black text-white italic">+{sessionHearts + 1}<span className="text-red-500 text-lg ml-0.5">❤️</span></span>
+                        {/* Star Reward Display */}
+                        {(completion >= 50) && (
+                          <span className="text-xl font-black text-yellow-400 italic">+{completion >= 100 ? 10 : 5}⭐</span>
+                        )}
+                        <span className="text-[9px] font-bold text-slate-500 tracking-tighter">(Bonus Included)</span>
                       </div>
                     </div>
                     <div>
                       <p className="text-[9px] font-black text-slate-500 uppercase mb-1 tracking-widest">Growth</p>
-                      <span className="text-xl font-black text-white italic">+{animatedExp} EXP</span>
+                      <span className="text-2xl font-black text-white italic">+{animatedExp} <span className="text-xs text-slate-500 ml-0.5">EXP</span></span>
                     </div>
                   </div>
-                  <div className="mt-4 text-center">
-                    <p className="text-[9px] font-black text-slate-500 uppercase mb-1 tracking-widest">Peak Sync</p>
-                    <span className="text-lg font-black text-blue-400 italic">{maxCombo} COMBO</span>
+
+                  {/* Level Bar Animation */}
+                  <div className="mt-6 pt-6 border-t border-white/5 space-y-2">
+                    <div className="flex justify-between items-end">
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Level {Math.floor((currentExp + animatedExp) / 10000) + 1}</span>
+                    </div>
+                    <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden relative">
+                      {/* Previous Progress (Ghost) */}
+                      <div className="absolute top-0 left-0 h-full bg-white/20" style={{ width: `${(currentExp % 10000) / 100}%` }}></div>
+                      {/* New Progress (Fill) */}
+                      <div className="absolute top-0 left-0 h-full bg-blue-500 transition-all duration-300 ease-out" style={{ width: `${((currentExp + animatedExp) % 10000) / 100}%` }}></div>
+                    </div>
+                    <div className="flex justify-between items-center text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">
+                      <span>Total EXP: {currentExp + animatedExp}</span>
+                      <span className="text-white tabular-nums">{(currentExp + animatedExp) % 10000} / 10000 EXP</span>
+                    </div>
                   </div>
-                  <div className="mt-6 pt-6 border-t border-white/5 flex flex-col items-center">
-                    <p className="text-[9px] font-black text-slate-500 uppercase mb-1 tracking-widest">Shields Salvaged</p>
-                    <span className="text-lg font-black text-blue-500 italic">+{sessionShields}🛡️</span>
+
+                  <div className="mt-6 pt-6 border-t border-white/5 grid grid-cols-2 gap-6 text-center">
+                    <div>
+                      <p className="text-[9px] font-black text-slate-500 uppercase mb-1 tracking-widest">Peak Sync</p>
+                      <span className="text-lg font-black text-blue-400 italic">{maxCombo} COMBO</span>
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-black text-slate-500 uppercase mb-1 tracking-widest">Salvage</p>
+                      <span className="text-lg font-black text-blue-500 italic">+{sessionShields}🛡️</span>
+                    </div>
                   </div>
                 </div>
 
-                <button onClick={exitSession} className="w-full py-6 bg-white text-black font-black text-2xl uppercase italic rounded-2xl shadow-2xl hover:scale-105 active:scale-95 transition-all">Claim Awards</button>
+                <button onClick={handleClaimAwards} className="w-full py-5 bg-white text-black font-black text-xl uppercase italic rounded-xl shadow-[4px_4px_0_0_#333] hover:shadow-[6px_6px_0_0_#333] hover:-translate-y-0.5 active:translate-y-[2px] active:shadow-none active:scale-95 transition-all relative z-10 group">
+                  <span className="group-active:scale-90 inline-block transition-transform">Claim Awards</span>
+                </button>
+
+                {/* Fly-out Animations */}
+                {isFlyoutAnimating && (
+                  <div className="fixed inset-0 pointer-events-none z-[200]">
+                    {/* Hearts Flyout */}
+                    {[...Array(Math.min(5, sessionHearts + 1))].map((_, i) => (
+                      <div key={`heart-${i}`} className="absolute top-1/2 left-1/2 text-2xl animate-fly-to-wallet-heart" style={{ animationDelay: `${i * 0.1}s` }}>❤️</div>
+                    ))}
+                    {/* Shields Flyout */}
+                    {[...Array(Math.min(5, sessionShields))].map((_, i) => (
+                      <div key={`shield-${i}`} className="absolute top-1/2 left-1/2 text-2xl animate-fly-to-wallet-shield" style={{ animationDelay: `${i * 0.1}s` }}>🛡️</div>
+                    ))}
+                    {/* Stars/EXP Flyout */}
+                    {[...Array(5)].map((_, i) => (
+                      <div key={`star-${i}`} className="absolute top-1/2 left-1/2 text-xs font-black text-yellow-400 animate-fly-to-wallet-exp" style={{ animationDelay: `${i * 0.05}s` }}>⭐</div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
 
           {isPaused && (
-            <div className="absolute inset-0 bg-black/70 backdrop-blur-md flex flex-col items-center justify-center z-[140]">
-              <div className="w-72 p-10 rounded-2xl text-center shadow-2xl animate-in zoom-in-95 duration-200">
-                <h2 className="text-2xl font-black italic text-white uppercase mb-8 tracking-tighter">Game Paused</h2>
-                <div className="space-y-4">
-                  <button onClick={() => { setIsPaused(false); audioRef.current?.play(); }} className="w-full py-5 bg-white text-black font-black text-lg uppercase italic rounded-xl shadow-xl hover:scale-105 active:scale-95 transition-all">Resume Sync</button>
-                  <button onClick={restartSession} className="w-full py-3 bg-white/5 border border-white/10 text-slate-300 font-black text-xs uppercase italic rounded-xl hover:bg-white/10 transition-colors">Restart Session</button>
-                  <button onClick={exitSession} className="w-full py-3 bg-transparent text-slate-600 font-black text-xs uppercase italic tracking-widest hover:text-red-500 transition-colors">Eject & Exit</button>
+            <div className="absolute inset-0 backdrop-blur-xl flex flex-col items-center justify-center z-[140] animate-in fade-in duration-200">
+              <div className="w-80  p-8 rounded-[2rem] text-center shadow-2xl animate-in zoom-in-95 duration-200 relative overflow-hidden">
+                {/* Decorative glow */}
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-40 h-40  rounded-full blur-[60px] pointer-events-none"></div>
+
+                <h2 className="text-3xl font-black italic text-white uppercase mb-8 tracking-tighter relative z-10">game Paused</h2>
+                <div className="space-y-3 relative z-10">
+                  <button onClick={() => { setIsPaused(false); rampAudioToSpeed(1.0, 3000); }} className="w-full py-4 bg-white text-black font-black text-lg uppercase italic rounded-xl shadow-[4px_4px_0_0_#333] hover:shadow-[6px_6px_0_0_#333] hover:-translate-y-0.5 active:translate-y-[2px] active:shadow-none active:scale-95 transition-all">Resume</button>
+                  <button onClick={restartSession} className="w-full py-3 bg-zinc-900 text-zinc-400 font-black text-xs uppercase italic rounded-xl hover:bg-zinc-700 hover:text-white transition-colors border border-transparent hover:border-white/10">Restart S</button>
+                  <button onClick={exitSession} className="w-full py-3 bg-transparent text-red-500/80 font-black text-xs uppercase italic tracking-widest hover:text-red-500 transition-colors">Eject & Exit</button>
                 </div>
               </div>
             </div>
@@ -926,7 +1267,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
         </div>
 
         {feedback && (
-          <div className="absolute bottom-[20%] left-0 right-0 flex justify-center pointer-events-none z-[150] animate-in zoom-in-50 fade-in duration-150">
+          <div className="absolute top-[20%] left-0 right-0 flex justify-center pointer-events-none z-[150] animate-in zoom-in-50 fade-in duration-150">
             <p
               className={`font-black italic uppercase ${feedback.color}`}
               style={{

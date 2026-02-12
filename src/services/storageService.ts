@@ -57,5 +57,31 @@ export const storageService = {
     async deleteTrack(id: string) {
         const db = await this.initDB();
         await db.delete(STORE_NAME, id);
+    },
+
+    async updateTrackStats(id: string, updates: Partial<AudioAnalysis>) {
+        const db = await this.initDB();
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+
+        const record = await store.get(id);
+        if (!record) return;
+
+        const updatedRecord = {
+            ...record,
+            analysis: {
+                ...record.analysis,
+                ...updates
+            }
+        };
+
+        await store.put(updatedRecord);
+        await store.put(updatedRecord);
+        await tx.done;
+    },
+
+    async clearAllData() {
+        const db = await this.initDB();
+        await db.clear(STORE_NAME);
     }
 };
