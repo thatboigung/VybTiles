@@ -50,12 +50,12 @@ export const HistoryList: React.FC<HistoryListProps> = ({ history, onSelect, onD
               {/* Hover effect background */}
               <div className="absolute inset-0"></div>
 
-              <div className="flex-1 min-w-0 pr-6 relative z-10">
-                <p className="text-lg">
+              <div className="flex-1 min-w-0 pr-6 relative z-10 flex flex-col justify-center">
+                <p className="text-lg font-medium text-white truncate w-full" title={item.fileName}>
                   {item.fileName}
                 </p>
-                <div className="flex items-center gap-4 mt-2">
-                  <div className="flex items-center gap-2 bg-black/20 px-2 py-0.5 rounded-md">
+                <div className="flex items-center gap-4 mt-2 flex-wrap">
+                  <div className="flex items-center gap-2 bg-black/20 px-2 py-0.5 rounded-md shrink-0">
                     <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
                       {item.bpm || '128'} BPM
                     </span>
