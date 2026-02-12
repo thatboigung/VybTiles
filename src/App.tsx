@@ -11,6 +11,7 @@ import { BottomNav } from './components/BottomNav';
 import { ExchangeSuccessModal } from './components/ExchangeSuccessModal';
 import { ResourceShopModal } from './components/ResourceShopModal';
 import { InsufficientFundsModal } from './components/InsufficientFundsModal';
+import { Analytics } from './components/Analytics';
 import type { AudioAnalysis, UserStats } from './types';
 import { analyzeLocally } from './services/geminiService';
 import { storageService } from './services/storageService';
@@ -29,6 +30,7 @@ const MAX_HEARTS = 10;
 const App: React.FC = () => {
   const [currentPlaylist, setCurrentPlaylist] = useState<AudioAnalysis[] | null>(null);
   const [history, setHistory] = useState<AudioAnalysis[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisStep, setAnalysisStep] = useState<string>('Initializing');
   const [screen, setScreen] = useState<'landing' | 'collection' | 'game' | 'settings'>('landing');
@@ -276,45 +278,37 @@ const App: React.FC = () => {
 
 
 
-  const handleGameFinish = (earnedExp: number, sessionHearts: number, sessionShields: number, completion: number, sessionPerfects: number, difficulty: Level) => {
-    // Update track stats if current completion is better
+  const handleGameFinish = (sessionHearts: number, sessionShields: number, sessionPerfects: number, difficulty: Level, completion: number) => {
+    // Update completion in history if better than previous
     if (currentPlaylist && currentPlaylist.length > 0) {
       const trackId = currentPlaylist[0].id;
       const currentBest = history.find(t => t.id === trackId)?.completion || 0;
 
       if (completion > currentBest) {
-        // Update local state
         setHistory(prev => prev.map(t => t.id === trackId ? { ...t, completion } : t));
-        // Update persisted storage
         storageService.updateTrackStats(trackId, { completion });
       }
     }
 
-    // Star Rewards Logic based on Difficulty
-    let starsEarned = 0;
-    if (completion >= 100) {
-      if (difficulty === 'hard') starsEarned = 13;
-      else if (difficulty === 'medium') starsEarned = 8;
-      else starsEarned = 5; // Easy/Default
-    } else if (completion >= 50) {
-      if (difficulty === 'hard') starsEarned = 6;
-      else if (difficulty === 'medium') starsEarned = 3;
-      else starsEarned = 2; // Easy/Default
-    }
+    // Award stars based on difficulty
+    const starsEarned = difficulty === 'hard' ? 6 : difficulty === 'medium' ? 3 : 2;
+
+    // Calculate EXP based on perfects
+    const earnedExp = sessionPerfects * 10;
 
     setUser(prev => {
       const newExp = prev.exp + earnedExp;
       return {
         ...prev,
         exp: newExp,
-        level: Math.floor(newExp / 10000) + 1, // 10000 EXP = 1 Level
+        level: Math.floor(newExp / 10000) + 1,
         songsPlayed: (prev.songsPlayed || 0) + 1,
-        playtime: (prev.playtime || 0) + 180, // Approx 3 mins per song
+        playtime: (prev.playtime || 0) + 180,
         perfects: (prev.perfects || 0) + sessionPerfects,
         stars: (prev.stars || 0) + starsEarned
       };
     });
-    // Add collected hearts and shields to global currency
+
     setHearts(prev => Math.min(MAX_HEARTS, prev + sessionHearts + 1));
     setShields(prev => prev + sessionShields);
   };
@@ -422,27 +416,31 @@ const App: React.FC = () => {
 
         {screen === 'collection' && (
           <div className="h-full container mx-auto px-4 py-8 overflow-y-auto no-scrollbar relative">
-            <div className="max-w-5xl mx-auto space-y-12">
+            <div className="max-w-5xl mx-auto space-y-8">
               <section className="relative">
+                {/* Analytics at top */}
+                <Analytics user={user} />
 
-
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 pb-20">
-                  <div className="lg:col-span-4 md:flex md:gap-6 lg:block">
-                    <div className="flex-1 w-full">
-                      <FileUploader
-                        onUpload={handleFileUpload}
-                        isAnalyzing={isAnalyzing}
-                        userPerfects={user.perfects || 0}
-                        userStars={user.stars || 0}
-                        onDeductCurrency={(p, s) => setUser(prev => ({ ...prev, perfects: (prev.perfects || 0) - p, stars: (prev.stars || 0) - s }))}
-                      />
-                    </div>
-
-                  </div>
-                  <div className="lg:col-span-8">
-                    <HistoryList history={history} onSelect={handlePlayFromHistory} onDelete={handleDeleteTrack} />
-                  </div>
+                {/* FileUploader in middle - full width */}
+                <div className="w-full">
+                  <FileUploader
+                    onUpload={handleFileUpload}
+                    isAnalyzing={isAnalyzing}
+                    userPerfects={user.perfects || 0}
+                    userStars={user.stars || 0}
+                    onDeductCurrency={(p, s) => setUser(prev => ({ ...prev, perfects: (prev.perfects || 0) - p, stars: (prev.stars || 0) - s }))}
+                    onSearchChange={setSearchQuery}
+                  />
                 </div>
+
+                {/* History List at bottom */}
+                <HistoryList
+                  history={searchQuery ? history.filter(track =>
+                    track.fileName.toLowerCase().includes(searchQuery.toLowerCase())
+                  ) : history}
+                  onSelect={handlePlayFromHistory}
+                  onDelete={handleDeleteTrack}
+                />
               </section>
             </div>
           </div >
@@ -464,6 +462,7 @@ const App: React.FC = () => {
           screen === 'game' && currentPlaylist && (
             <BeatGame
               playlist={currentPlaylist}
+              allSongs={history}
               onExit={() => setScreen('collection')}
               globalHearts={hearts}
               globalShields={shields}

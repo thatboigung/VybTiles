@@ -13,27 +13,15 @@ const TutorialModal: React.FC<{ mode: string; isOpen: boolean; onClose: () => vo
       <div className="max-w-md w-full bg-zinc-950 border border-white/10 p-8 rounded-3xl shadow-2xl">
         <h2 className="text-3xl font-black italic text-white uppercase mb-6 tracking-tighter">Protocol: {mode.toUpperCase()}</h2>
         <div className="space-y-4 text-slate-400 text-sm leading-relaxed mb-8">
-          {mode === 'dodge' ? (
-            <div className="space-y-3">
-              <p className="text-white font-bold text-base underline underline-offset-4">Dodge Rules:</p>
-              <ul className="text-left list-disc list-inside space-y-2">
-                <li><span className="text-blue-400 font-bold">SLIDE</span> to move your orb.</li>
-                <li><span className="text-red-500 font-bold">AVOID</span> red obstacles to score.</li>
-                <li><span className="text-green-500 font-bold">SCORE</span> 500 points for every successful dodge.</li>
-                <li>Collect ❤️ and 🛡️ to survive hits.</li>
-              </ul>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <p className="text-white font-bold text-base underline underline-offset-4">Core Rules:</p>
-              <ul className="text-left list-disc list-inside space-y-2">
-                <li><span className="text-blue-400 font-bold">TAP</span> tiles anywhere in their lane as they fall.</li>
-                <li><span className="text-red-500 font-bold">DON'T</span> tap empty space (penalty).</li>
-                <li><span className="text-red-500 font-bold">DON'T</span> let tiles pass (failure).</li>
-                <li>Collect ❤️ and 🛡️ to stay in the sync.</li>
-              </ul>
-            </div>
-          )}
+          <div className="space-y-3">
+            <p className="text-white font-bold text-base underline underline-offset-4">Core Rules:</p>
+            <ul className="text-left list-disc list-inside space-y-2">
+              <li><span className="text-blue-400 font-bold">TAP</span> tiles anywhere in their lane as they fall.</li>
+              <li><span className="text-red-500 font-bold">DON'T</span> tap empty space (penalty).</li>
+              <li><span className="text-red-500 font-bold">DON'T</span> let tiles pass (failure).</li>
+              <li>Collect ❤️ and 🛡️ to stay in the sync.</li>
+            </ul>
+          </div>
         </div>
         <button
           onClick={() => {
@@ -51,12 +39,13 @@ const TutorialModal: React.FC<{ mode: string; isOpen: boolean; onClose: () => vo
 
 interface BeatGameProps {
   playlist: AudioAnalysis[];
+  allSongs?: AudioAnalysis[]; // Full history for endless mode shuffle
   onExit: () => void;
   globalHearts: number;
   globalShields: number;
   userPerfects: number;
-  onUseCurrency: (h: number, s: number, g: number) => void;
-  onFinish: (exp: number, sessionHearts: number, sessionShields: number, completion: number, sessionPerfects: number, difficulty: Level) => void;
+  onUseCurrency: (hearts: number, shields: number, gold?: number) => void;
+  onFinish: (sessionHearts: number, sessionShields: number, sessionPerfects: number, difficulty: Level, completion: number) => void;
   userLevel: number;
   currentExp: number;
 }
@@ -84,7 +73,7 @@ const StarIcon = ({ active, className }: { active: boolean; className?: string }
 );
 
 export const BeatGame: React.FC<BeatGameProps> = ({
-  playlist, onExit, globalHearts, globalShields, userPerfects, onUseCurrency, onFinish, userLevel, currentExp
+  playlist, allSongs, onExit, globalHearts, globalShields, userPerfects, onUseCurrency, onFinish, userLevel, currentExp
 }) => {
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
   const [selectedMode, setSelectedMode] = useState<GameMode>(playlist.length > 1 ? 'endless' : 'classic');
@@ -126,6 +115,10 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   const [animatedExp, setAnimatedExp] = useState(0);
   const [feedback, setFeedback] = useState<{ text: string; color: string; scale: number } | null>(null);
 
+  // Shuffle queue for endless mode
+  const [shuffleQueue, setShuffleQueue] = useState<AudioAnalysis[]>([]);
+  const [queueIndex, setQueueIndex] = useState(0);
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const notesRef = useRef<Note[]>([]);
@@ -137,6 +130,57 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   const gameAreaRef = useRef<HTMLDivElement>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
   const isDraggingRef = useRef(false);
+
+  // Initialize shuffle queue for endless mode
+  React.useEffect(() => {
+    if (selectedMode === 'endless' && allSongs && allSongs.length > 0) {
+      const shuffled = [...allSongs].sort(() => Math.random() - 0.5);
+      setShuffleQueue(shuffled);
+      setQueueIndex(0);
+    }
+  }, [selectedMode, allSongs]);
+
+  // Auto-advance to next song in endless mode
+  const loadNextSongInEndless = React.useCallback(() => {
+    if (selectedMode !== 'endless' || !shuffleQueue.length) return;
+
+    let nextIndex = queueIndex + 1;
+
+    // If we've exhausted the queue, reshuffle
+    if (nextIndex >= shuffleQueue.length) {
+      const reshuffled = [...shuffleQueue].sort(() => Math.random() - 0.5);
+      setShuffleQueue(reshuffled);
+      nextIndex = 0;
+    }
+
+    setQueueIndex(nextIndex);
+    const nextSong = shuffleQueue[nextIndex];
+
+    // Reset game state for new song
+    setScore(0);
+    setCombo(0);
+    setSessionHearts(0);
+    setSessionShields(0);
+    setSessionPerfects(0);
+    setIsCleared(false);
+    setIsGameOver(false);
+    setIsFailing(false);
+    setActiveLives(5);
+    setReviveCount(0);
+
+    // Load the new song
+    loadTrackNotes(nextSong);
+
+    // Reset and play audio
+    if (audioRef.current && nextSong.fileUrl) {
+      audioRef.current.src = nextSong.fileUrl;
+      audioRef.current.currentTime = 0;
+      audioRef.current.play();
+      setIsActive(true);
+    }
+  }, [selectedMode, shuffleQueue, queueIndex]);
+
+
 
   const spawnParticles = (x: number, y: number, color: string, count: number) => {
     for (let i = 0; i < count; i++) {
@@ -327,7 +371,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
   const loadTrackNotes = (analysis: AudioAnalysis) => {
     notesRef.current = analysis.beats.flatMap((beatTime, index) => {
-      let type: 'obstacle' | 'powerup' | 'tile' = selectedMode === 'dodge' ? 'obstacle' : 'tile';
+      let type: 'obstacle' | 'powerup' | 'tile' = 'tile';
       const isPowerUp = Math.random() < 0.1;
       let powerType: PowerUpType = 'none';
       if (isPowerUp) {
@@ -359,7 +403,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
       const doubleTileChance = isLateGame ? 0.6 : 0.25;
 
       // Double Tile Chance
-      if (selectedMode !== 'dodge' && Math.random() < doubleTileChance) {
+      if (Math.random() < doubleTileChance) {
         let lane2 = Math.floor(Math.random() * LANES);
         while (lane2 === lane1) lane2 = Math.floor(Math.random() * LANES);
 
@@ -513,7 +557,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     setIsExiting(true);
     // Delay unmount to allow exit animation
     setTimeout(() => {
-      onFinish(expEarned, sessionHearts, sessionShields, completion, sessionPerfects, selectedLevel);
+      onFinish(sessionHearts, sessionShields, sessionPerfects, selectedLevel, completion);
       onExit();
     }, 200);
   };
@@ -532,7 +576,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     // Trigger save immediately or before exit? 
     // Let's do it before exit to ensure we have the data
     setTimeout(() => {
-      onFinish(expEarned, sessionHearts, sessionShields, completion, sessionPerfects, selectedLevel);
+      onFinish(sessionHearts, sessionShields, sessionPerfects, selectedLevel, completion);
       setIsExiting(true);
       setTimeout(onExit, 200);
     }, 1500); // Wait for flyout animation
@@ -650,19 +694,6 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
       const speed = getNoteSpeed();
 
-      if (selectedMode === 'dodge') {
-        const pX = (playerLane * lW) + (lW / 2);
-        // Move player up a bit (TARGET_Y_RATIO - 0.1)
-        const playerY = h * (TARGET_Y_RATIO - 0.1);
-
-        ctx.save();
-        ctx.globalAlpha = invincible ? (Math.sin(t * 15) > 0 ? 0.2 : 0.8) : 1;
-        ctx.shadowBlur = 30; ctx.shadowColor = 'white';
-        // Use playerY instead of targetY
-        ctx.beginPath(); ctx.arc(pX, playerY, 28, 0, Math.PI * 2); ctx.fillStyle = 'white'; ctx.fill();
-        ctx.restore();
-      }
-
       const visibleRangeSeconds = (h / speed) + 1;
 
       // Render Connectors for simultaneous tiles (Double Tiles)
@@ -675,7 +706,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
       });
 
       timeGroups.forEach((group) => {
-        if (group.length > 1 && selectedMode !== 'dodge') {
+        if (group.length > 1) {
           const y = targetY - ((group[0].time - displayTime) * speed);
           if (y > -200 && y < h + 200) {
             // Find min and max x
@@ -704,7 +735,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
         if (note.missed) return;
 
         // Check for Simultaneous Sync Failure (Double Tiles)
-        if (!note.hit && selectedMode !== 'dodge') {
+        if (!note.hit) {
           // Find if this note has a partner (same time) that was hit > 300ms ago
           const partner = notesRef.current.find(n => n.time === note.time && n.id !== note.id);
           if (partner && partner.hit && partner.hitTimestamp) {
@@ -723,37 +754,17 @@ export const BeatGame: React.FC<BeatGameProps> = ({
         const timeDiff = note.time - displayTime;
         if (timeDiff > visibleRangeSeconds) return;
         if (timeDiff < -0.15 && !isFailing) { // Reduced threshold for missing tiles
-          if (selectedMode !== 'dodge' && !note.hit && !note.missed) {
+          if (!note.hit && !note.missed) {
             note.missed = true;
             setScore(s => Math.max(0, s - 500)); // Penalty for skipping
             setCombo(0);
             handleFailure(note.id);
             showFeedback('MISS', 'text-red-500', 1.0);
-          } else if (selectedMode === 'dodge' && !note.hit && !note.missed && note.type === 'obstacle') {
-            // Dodge success: Obstacle passed without hit
-            note.missed = true; // Mark as processed
-            setScore(s => s + 500);
-            setCombo(c => c + 1);
           }
           return;
         }
 
         const y = targetY - (timeDiff * speed);
-
-        if (selectedMode === 'dodge') {
-          // Check collision with playerY
-          const playerY = h * (TARGET_Y_RATIO - 0.1);
-          if (Math.abs(y - playerY) < 45 && note.lane === playerLane) {
-            note.hit = true;
-            if (note.type === 'obstacle') handleFailure(note.id);
-            else if (note.type === 'powerup') {
-              if (note.powerUp === 'shield') setSessionShields(s => s + 1);
-              else setSessionHearts(h => h + (note.powerUp === 'life1' ? 1 : 2));
-              setScore(s => s + 2000);
-              spawnParticles((note.lane * lW) + lW / 2, playerY, 'white', 20);
-            }
-          }
-        }
 
         if (y > -200 && y < h + 200) {
           const x = (note.lane * lW) + (lW / 2);
@@ -813,32 +824,43 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     return () => cancelAnimationFrame(requestRef.current!);
   }, [isActive, isPaused, isGameOver, isCleared, playerLane, selectedMode, invincible, shake, selectedLevel, laneHits]);
 
+  // Listen for audio ended event to auto-advance in endless mode
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const handleAudioEnded = () => {
+      if (selectedMode === 'endless') {
+        // Small delay for smooth transition
+        setTimeout(() => {
+          loadNextSongInEndless();
+        }, 500);
+      }
+    };
+
+    audio.addEventListener('ended', handleAudioEnded);
+    return () => audio.removeEventListener('ended', handleAudioEnded);
+  }, [selectedMode, loadNextSongInEndless]);
+
+
   // Keyboard Controls
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (isPaused || isGameOver || isCleared || isFailing) return;
 
-      if (selectedMode === 'dodge') {
-        if (e.code === 'ArrowLeft') {
-          setPlayerLane(prev => Math.max(0, prev - 1));
-        } else if (e.code === 'ArrowRight') {
-          setPlayerLane(prev => Math.min(LANES - 1, prev + 1));
-        }
-      } else {
-        const keyMap: Record<string, number> = {
-          'KeyD': 0, 'KeyF': 1, 'KeyJ': 2, 'KeyK': 3,
-          'ArrowLeft': 0, 'ArrowDown': 1, 'ArrowUp': 2, 'ArrowRight': 3 // Alternative
-        };
-        if (e.code in keyMap) {
-          handleHit(keyMap[e.code]);
-          // Visual feedback for key press
-          const lane = keyMap[e.code];
-          setLaneHits(prev => {
-            const next = [...prev];
-            next[lane] = Date.now();
-            return next;
-          });
-        }
+      const keyMap: Record<string, number> = {
+        'KeyD': 0, 'KeyF': 1, 'KeyJ': 2, 'KeyK': 3,
+        'ArrowLeft': 0, 'ArrowDown': 1, 'ArrowUp': 2, 'ArrowRight': 3 // Alternative
+      };
+      if (e.code in keyMap) {
+        handleHit(keyMap[e.code]);
+        // Visual feedback for key press
+        const lane = keyMap[e.code];
+        setLaneHits(prev => {
+          const next = [...prev];
+          next[lane] = Date.now();
+          return next;
+        });
       }
     };
 
@@ -857,20 +879,12 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     const r = gameAreaRef.current?.getBoundingClientRect();
     if (r) {
       const l = Math.max(0, Math.min(LANES - 1, Math.floor((e.clientX - r.left) / (r.width / LANES))));
-      if (selectedMode === 'dodge') {
-        // Prevent instant jumps > 1 lane. Only allow moving 1 step towards target.
-        setPlayerLane(prev => {
-          if (l === prev) return prev;
-          if (l > prev) return prev + 1;
-          return prev - 1;
-        });
-      }
-      else handleHit(l, e.clientY - r.top);
+      handleHit(l, e.clientY - r.top);
     }
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
-    if (isDraggingRef.current && selectedMode === 'dodge') {
+    if (isDraggingRef.current) {
       const r = gameAreaRef.current?.getBoundingClientRect();
       if (r) {
         const l = Math.max(0, Math.min(LANES - 1, Math.floor((e.clientX - r.left) / (r.width / LANES))));
@@ -910,7 +924,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
           {/* HUD */}
           <div className="absolute top-0 left-0 right-0 p-4 z-50 pointer-events-none flex flex-col gap-4">
             <div className="flex justify-between items-start gap-4">
-              <div className="flex-1 flex flex-col gap-1">
+              <div className="flex-1 flex flex-wrap gap-2">
                 {/* Score Display (Minimal) */}
                 <div className="flex flex-col items-start bg-black/40 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/5 shadow-xl w-fit">
                   <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest leading-none mb-0.5">Score</span>
@@ -918,9 +932,17 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                 </div>
 
                 {/* Gold / Perfects Display */}
-                <div className="flex items-center gap-2 bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/5 w-fit mt-1">
+                <div className="flex items-center gap-2 bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/5 w-fit">
                   <div className="w-1.5 h-1.5 rounded-full bg-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.6)]"></div>
                   <span className="text-xs font-black text-yellow-100 tabular-nums tracking-tight">{sessionPerfects.toLocaleString()} <span className="text-[9px] text-yellow-500/80 ml-0.5">GOLD</span></span>
+                </div>
+
+                {/* Shields / Lives Display */}
+                <div className="flex items-center gap-2 bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/5 w-fit">
+                  <svg className="w-3 h-3 text-blue-400" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3z" />
+                  </svg>
+                  <span className="text-xs font-black text-blue-100 tabular-nums tracking-tight">{activeLives} <span className="text-[9px] text-blue-500/80 ml-0.5">LIVES</span></span>
                 </div>
               </div>
 
@@ -949,15 +971,15 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                 <div ref={progressBarRef} className="h-full bg-white transition-none" style={{ width: '0%' }}></div>
               </div>
 
-              <div className="absolute top-1/2 -translate-y-1/2 left-2 right-2 flex justify-between pointer-events-none px-1 mt-2">
-                <div className="relative" style={{ left: '0%' }}></div>
-                <div className="relative" style={{ left: '25%' }}>
+
+              <div className="absolute top-1/2 -translate-y-1/2 left-2 right-2 pointer-events-none mt-2">
+                <div className="absolute -translate-x-1/2" style={{ left: '25%' }}>
                   <StarIcon active={currentTimeRef.current / durationRef.current >= 0.25} className="w-5 h-5" />
                 </div>
-                <div className="relative" style={{ left: '50%' }}>
+                <div className="absolute -translate-x-1/2" style={{ left: '50%' }}>
                   <StarIcon active={currentTimeRef.current / durationRef.current >= 0.5} className="w-5 h-5" />
                 </div>
-                <div className="relative" style={{ left: '100%' }}>
+                <div className="absolute -translate-x-1/2" style={{ left: '100%' }}>
                   <StarIcon active={currentTimeRef.current / durationRef.current >= 0.99} className="w-6 h-6" />
                 </div>
               </div>
@@ -1001,7 +1023,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                   <div className="space-y-2">
                     <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest text-left pl-1">Game Mode</p>
                     <div className="flex gap-2 p-1 bg-white/5 border border-white/10 rounded-xl">
-                      {['classic', 'dodge', 'endless'].map(m => (
+                      {['classic', 'endless'].map(m => (
                         <button key={m} onClick={() => setSelectedMode(m as any)} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${selectedMode === m ? 'bg-white text-black shadow-lg scale-105' : 'text-slate-500 hover:text-slate-300'}`}>{m}</button>
                       ))}
                     </div>
@@ -1212,7 +1234,11 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                     </div>
                   </div>
 
-                  <div className="mt-6 pt-6 border-t border-white/5 grid grid-cols-2 gap-6 text-center">
+                  <div className="mt-6 pt-6 border-t border-white/5 grid grid-cols-3 gap-4 text-center">
+                    <div>
+                      <p className="text-[9px] font-black text-slate-500 uppercase mb-1 tracking-widest">Gold</p>
+                      <span className="text-lg font-black text-yellow-400 italic">+{sessionPerfects}💰</span>
+                    </div>
                     <div>
                       <p className="text-[9px] font-black text-slate-500 uppercase mb-1 tracking-widest">Peak Sync</p>
                       <span className="text-lg font-black text-blue-400 italic">{maxCombo} COMBO</span>

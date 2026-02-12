@@ -29,11 +29,11 @@ export const HistoryList: React.FC<HistoryListProps> = ({ history, onSelect, onD
 
   if (history.length === 0) {
     return (
-      <div className="h-full flex flex-col items-center justify-center p-12 text-center bg-white/5 rounded-[2rem] border border-dashed border-white/10">
+      <div className="h-full flex flex-col items-center justify-center p-12 text-center ">
         <svg className="w-12 h-12 text-slate-800 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
         </svg>
-        <p className="text-slate-600 text-[10px] font-black uppercase tracking-[0.3em]">No compositions found</p>
+        <p className="text-slate-600 text-[10px] font-black uppercase tracking-[0.3em]">Upload audio files</p>
       </div>
     );
   }
