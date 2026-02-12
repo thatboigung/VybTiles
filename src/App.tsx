@@ -305,7 +305,7 @@ const App: React.FC = () => {
         songsPlayed: (prev.songsPlayed || 0) + 1,
         playtime: (prev.playtime || 0) + 180,
         perfects: (prev.perfects || 0) + sessionPerfects,
-        stars: (prev.stars || 0) + starsEarned
+        stars: Math.max(0, prev.stars || 0) + starsEarned
       };
     });
 
@@ -341,7 +341,7 @@ const App: React.FC = () => {
       setUser(prev => ({
         ...prev,
         perfects: (prev.perfects || 0) - cost,
-        stars: (prev.stars || 0) + 10
+        stars: Math.max(0, (prev.stars || 0)) + 10
       }));
       setExchangeInfo({ cost: 100, gained: 10 });
       setShowExchangeSuccess(true);
@@ -428,7 +428,11 @@ const App: React.FC = () => {
                     isAnalyzing={isAnalyzing}
                     userPerfects={user.perfects || 0}
                     userStars={user.stars || 0}
-                    onDeductCurrency={(p, s) => setUser(prev => ({ ...prev, perfects: (prev.perfects || 0) - p, stars: (prev.stars || 0) - s }))}
+                    onDeductCurrency={(p, s) => setUser(prev => ({
+                      ...prev,
+                      perfects: Math.max(0, (prev.perfects || 0) - p),
+                      stars: Math.max(0, (prev.stars || 0) - s)
+                    }))}
                     onSearchChange={setSearchQuery}
                   />
                 </div>
