@@ -481,10 +481,6 @@ const App: React.FC = () => {
           currentScreen={screen as any}
           setScreen={setScreen as any}
           hasAnalysis={!!currentPlaylist}
-          onExchange={handleExchangeCurrency}
-          onShowShop={() => setShowResourceMenu(true)}
-          hearts={hearts}
-          shields={shields}
         />
       )}
 

@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { DeleteConfirmationModal } from './DeleteConfirmationModal';
+import type { AudioAnalysis } from '../types';
 
 interface HistoryListProps {
   history: AudioAnalysis[];

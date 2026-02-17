@@ -1,21 +1,18 @@
 
 import React from 'react';
 import type { UserStats } from '../types';
-import { CurrencyBar } from './CurrencyBar';
+
 
 interface HeaderProps {
   user: UserStats;
   currentScreen: 'collection' | 'game' | 'settings';
   setScreen: (screen: 'collection' | 'game' | 'settings') => void;
   hasAnalysis: boolean;
-  onExchange: () => void;
-  onShowShop: () => void;
-  hearts: number;
-  shields: number;
+
 }
 
 export const Header: React.FC<HeaderProps> = ({
-  user, currentScreen, setScreen, onExchange, onShowShop, hearts, shields
+  user, currentScreen, setScreen
 }) => {
   const [showHelpMenu, setShowHelpMenu] = React.useState(false);
   const [showShopMenu, setShowShopMenu] = React.useState(false);

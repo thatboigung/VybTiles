@@ -91,7 +91,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   const [selectedLevel, setSelectedLevel] = useState<Level>(getInitialLevel());
   const [isActive, setIsActive] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
-  const [isFlyoutAnimating, setIsFlyoutAnimating] = useState(false);
+
   const [isGameOver, setIsGameOver] = useState(false);
   const [isCleared, setIsCleared] = useState(false);
   const [isFailing, setIsFailing] = useState(false);
@@ -103,7 +103,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   const [laneHits, setLaneHits] = useState<number[]>(new Array(LANES).fill(0));
   const [combo, setCombo] = useState(0);
   const [completion, setCompletion] = useState(0);
-  const [maxCombo, setMaxCombo] = useState(0);
+
   const [sessionHearts, setSessionHearts] = useState(0);
   const [sessionShields, setSessionShields] = useState(0);
   const [sessionPerfects, setSessionPerfects] = useState(0);
@@ -360,7 +360,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
         // PERFECT: < 0.05s (50ms)
         if (diff < 0.05) {
           setScore(s => s + 1000 + combo * 50);
-          setCombo(c => { const n = c + 1; setMaxCombo(m => Math.max(m, n)); return n; });
+          setCombo(c => c + 1);
           const bonus = combo >= 2 ? combo : 1;
           setSessionPerfects(p => p + bonus);
           // Heavy shake for perfect hit (Only shake for first 3 perfects to prevent lag)
@@ -524,7 +524,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     loadTrackNotes(startSong);
     particlesRef.current = [];
 
-    setScore(0); setCombo(0); setMaxCombo(0); setSessionHearts(0); setSessionShields(0); setSessionPerfects(0); setPlayerLane(1);
+    setScore(0); setCombo(0); setSessionHearts(0); setSessionShields(0); setSessionPerfects(0); setPlayerLane(1);
     setIsActive(true); setIsPaused(false); setIsGameOver(false); setIsCleared(false); setInvincible(false);
 
     // Immediate Start with Slow Motion Ramp
@@ -579,14 +579,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     }
   };
 
-  const exitSession = () => {
-    setIsExiting(true);
-    // Delay unmount to allow exit animation
-    setTimeout(() => {
-      onFinish(sessionHearts, sessionShields, sessionPerfects, selectedLevel, completion);
-      onExit();
-    }, 200);
-  };
+
 
   const handleAbort = () => {
     setIsExiting(true);
@@ -598,7 +591,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   // but looking at existing usage, it's expected to be there. 
   // I will just use onExit in my new function to be safe.
   const handleClaimAwards = () => {
-    setIsFlyoutAnimating(true);
+
     // Trigger save immediately or before exit? 
     // Let's do it before exit to ensure we have the data
     setTimeout(() => {
