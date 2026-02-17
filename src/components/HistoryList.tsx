@@ -1,6 +1,5 @@
 
 import React, { useState } from 'react';
-import type { AudioAnalysis } from '../types';
 import { DeleteConfirmationModal } from './DeleteConfirmationModal';
 
 interface HistoryListProps {
@@ -9,7 +8,9 @@ interface HistoryListProps {
   onDelete: (id: string) => void;
 }
 
-export const HistoryList: React.FC<HistoryListProps> = ({ history, onSelect, onDelete }) => {
+export const HistoryList: React.FC<HistoryListProps> = ({
+  history, onSelect, onDelete
+}) => {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [trackToDelete, setTrackToDelete] = useState<AudioAnalysis | null>(null);
   const menuRef = React.useRef<HTMLDivElement>(null);
@@ -40,26 +41,29 @@ export const HistoryList: React.FC<HistoryListProps> = ({ history, onSelect, onD
 
   return (
     <>
-      <div className="space-y-4 pr-3" ref={menuRef}>
+      <div className="space-y-2 pr-1" ref={menuRef}>
         {history.map((item) => (
-          <div key={item.id} className="w-full flex items-center gap-4 group backdrop-blur-sm  mb-3">
-            <div
-              onClick={() => onSelect(item)}
-              className="flex-1 flex items-center justify-between p-4 cursor-pointer relative overflow-hidden rounded-xl"
-            >
+          <div key={item.id} className="w-full flex items-center gap-3 group backdrop-blur-sm mb-2">
+            <div className="flex-1 flex items-center gap-4 p-4 cursor-pointer relative overflow-hidden rounded-xl" onClick={() => onSelect(item)}>
               {/* Hover effect background */}
               <div className="absolute inset-0"></div>
 
-              <div className="flex-1 min-w-0 pr-6 relative z-10 flex flex-col justify-center">
+              {item.coverArt ? (
+                <img src={item.coverArt} alt="Cover" className="w-16 h-16 rounded-lg object-cover border border-white/10 shrink-0 relative z-10 bg-black/50" />
+              ) : (
+                <div className="w-16 h-16 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0 relative z-10">
+                  <svg className="w-6 h-6 text-white/20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                  </svg>
+                </div>
+              )}
+
+              <div className="flex-1 min-w-0 pr-2 relative z-10 flex flex-col justify-center">
                 <p className="text-lg font-medium text-white truncate w-full" title={item.fileName}>
                   {item.fileName}
                 </p>
                 <div className="flex items-center gap-4 mt-2 flex-wrap">
                   <div className="flex items-center gap-2 bg-black/20 px-2 py-0.5 rounded-md shrink-0">
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                      {item.bpm || '128'} BPM
-                    </span>
-                    <div className="w-[1px] h-3 bg-white/10 mx-1"></div>
                     <div className="flex gap-0.5" title={`Completion: ${item.completion || 0}%`}>
                       {[...Array(10)].map((_, i) => {
                         const earned = item.completion ? Math.floor(item.completion / 10) : 0;
@@ -71,14 +75,18 @@ export const HistoryList: React.FC<HistoryListProps> = ({ history, onSelect, onD
                       })}
                     </div>
                   </div>
-                  <div className="w-1 h-1 rounded-full bg-slate-700"></div>
-                  <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">
-                    {new Date(item.timestamp).toLocaleDateString()}
-                  </span>
                 </div>
               </div>
 
+              {/* Duration Display */}
+              {item.duration && (
+                <span className="text-xs font-bold text-slate-500 tabular-nums mr-4">
+                  {Math.floor(item.duration / 60)}:{Math.floor(item.duration % 60).toString().padStart(2, '0')}
+                </span>
+              )}
+
               <button
+                onClick={(e) => { e.stopPropagation(); onSelect(item); }}
                 className="w-12 h-12 bg-white text-black rounded-2xl flex items-center justify-center transition-all hover:scale-105 shadow-[0_4px_0_rgb(163,163,163)] active:shadow-none active:translate-y-[4px] relative z-10 opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0 duration-300"
                 title="Launch Game"
               >

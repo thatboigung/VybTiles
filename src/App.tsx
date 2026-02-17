@@ -2,19 +2,26 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { Level } from './types';
 import { Header } from './components/Header';
-import { FileUploader } from './components/FileUploader';
 import { BeatGame } from './components/BeatGame';
 import { HistoryList } from './components/HistoryList';
 import { Settings } from './components/Settings';
 import { LandingPage } from './components/LandingPage';
+import { CurrencyBar } from './components/CurrencyBar';
 import { BottomNav } from './components/BottomNav';
+import { BottomPlayer } from './components/BottomPlayer';
 import { ExchangeSuccessModal } from './components/ExchangeSuccessModal';
 import { ResourceShopModal } from './components/ResourceShopModal';
 import { InsufficientFundsModal } from './components/InsufficientFundsModal';
-import { Analytics } from './components/Analytics';
 import type { AudioAnalysis, UserStats } from './types';
 import { analyzeLocally } from './services/geminiService';
 import { storageService } from './services/storageService';
+import { parseBlob } from 'music-metadata-browser';
+import { Buffer } from 'buffer';
+
+// Polyfill Buffer for music-metadata-browser
+if (typeof window !== 'undefined') {
+  window.Buffer = window.Buffer || Buffer;
+}
 
 const STORAGE_KEYS = {
   HISTORY: 'music_tiles_fever_history',
@@ -34,6 +41,16 @@ const App: React.FC = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisStep, setAnalysisStep] = useState<string>('Initializing');
   const [screen, setScreen] = useState<'landing' | 'collection' | 'game' | 'settings' | 'help'>('landing');
+
+  // Global Audio Player State
+  const [activeAudioTrack, setActiveAudioTrack] = useState<AudioAnalysis | null>(null);
+  const [audioState, setAudioState] = useState({
+    isPlaying: false,
+    progress: 0,
+    currentTime: 0,
+    duration: 0
+  });
+  const globalAudioRef = useRef<HTMLAudioElement>(null);
 
   const [user, setUser] = useState<UserStats>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.USER);
@@ -226,6 +243,21 @@ const App: React.FC = () => {
       setAnalysisStep('Finalizing');
       const localResult = analyzeLocally(beats, file.name);
 
+      // Extract Cover Art
+      let coverArt: string | undefined = undefined;
+      try {
+        // Create a slice to ensure a fresh Blob reference and avoid potential caching
+        const freshBlob = file.slice(0, file.size);
+        const metadata = await parseBlob(freshBlob);
+        const picture = metadata.common.picture?.[0];
+        if (picture) {
+          const base64String = Buffer.from(picture.data).toString('base64');
+          coverArt = `data:${picture.format};base64,${base64String}`;
+        }
+      } catch (e) {
+        console.warn("Failed to extract cover art", e);
+      }
+
       const newAnalysis: AudioAnalysis = {
         id: crypto.randomUUID(),
         fileName: file.name,
@@ -239,7 +271,9 @@ const App: React.FC = () => {
         genre: localResult.genre || "Electronic",
         mood: localResult.mood || "Neutral",
         summary: localResult.summary || "Local sync ready.",
-        highlights: localResult.highlights || []
+        highlights: localResult.highlights || [],
+        coverArt,
+        duration: audioBuffer.duration
       };
 
       // Save to IndexedDB
@@ -309,8 +343,8 @@ const App: React.FC = () => {
 
     const starsEarned = baseStars + bonusStars;
 
-    // Calculate EXP based on perfects
-    const earnedExp = sessionPerfects * 10;
+    // Calculate EXP based on perfects (Base 300 + Performance)
+    const earnedExp = 300 + (sessionPerfects * 10);
 
     setUser(prev => {
       const newExp = prev.exp + earnedExp;
@@ -387,6 +421,52 @@ const App: React.FC = () => {
     }
   };
 
+  // Global Audio Logic
+
+
+  // Sync active track source
+  useEffect(() => {
+    if (activeAudioTrack && globalAudioRef.current) {
+      // Only change src if it's different to avoid reload
+      const currentSrc = globalAudioRef.current.src;
+      // Check if src needs update (handling blob vs object URL format)
+      if (!currentSrc.includes(activeAudioTrack.id) && activeAudioTrack.fileUrl && activeAudioTrack.fileUrl !== currentSrc) {
+        globalAudioRef.current.src = activeAudioTrack.fileUrl;
+        globalAudioRef.current.play().catch(e => console.error("Auto-play failed", e));
+      }
+    }
+  }, [activeAudioTrack]);
+
+  // Pause global audio when entering game
+  useEffect(() => {
+    if (screen === 'game' && globalAudioRef.current && !globalAudioRef.current.paused) {
+      globalAudioRef.current.pause();
+    }
+  }, [screen]);
+
+
+  const handleGlobalPlayPause = () => {
+    if (!globalAudioRef.current) return;
+    if (globalAudioRef.current.paused) {
+      if (!activeAudioTrack && history.length > 0) {
+        // Init with first track if nothing active
+        setActiveAudioTrack(history[0]);
+      } else {
+        globalAudioRef.current.play();
+      }
+    } else {
+      globalAudioRef.current.pause();
+    }
+  };
+
+  const handleGlobalSeek = (time: number) => {
+    if (globalAudioRef.current) {
+      globalAudioRef.current.currentTime = time;
+    }
+  };
+
+  const activeTrackForPlayer = activeAudioTrack || (history.length > 0 ? history[0] : null);
+
   if (screen === 'landing') {
     return <>
       <LandingPage onEnter={handleLandingComplete} />
@@ -394,7 +474,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="h-screen w-screen bg-[#0a0a0a] text-slate-100 flex flex-col overflow-hidden">
+    <div className="h-screen w-screen bg-[#121212] bg-gradient-to-b from-[#121212] to-black text-slate-100 flex flex-col overflow-hidden">
       {screen !== 'game' && (
         <Header
           user={user}
@@ -407,6 +487,30 @@ const App: React.FC = () => {
           shields={shields}
         />
       )}
+
+      {/* Global Audio Element */}
+      <audio
+        ref={globalAudioRef}
+        onPlay={() => setAudioState(prev => ({ ...prev, isPlaying: true }))}
+        onPause={() => setAudioState(prev => ({ ...prev, isPlaying: false }))}
+        onTimeUpdate={(e) => {
+          const audio = e.currentTarget;
+          setAudioState(prev => ({
+            ...prev,
+            currentTime: audio.currentTime,
+            progress: audio.duration ? audio.currentTime / audio.duration : 0,
+            duration: audio.duration || 0,
+          }));
+        }}
+        onLoadedMetadata={(e) => {
+          const audio = e.currentTarget;
+          setAudioState(prev => ({
+            ...prev,
+            duration: audio.duration || 0,
+          }));
+        }}
+        onEnded={() => setAudioState(prev => ({ ...prev, isPlaying: false, progress: 0, currentTime: 0 }))}
+      />
 
       <main className="flex-1 overflow-hidden relative">
         {isAnalyzing && (
@@ -432,28 +536,133 @@ const App: React.FC = () => {
 
         {screen === 'collection' && (
           <div className="h-full container mx-auto px-4 py-8 overflow-y-auto no-scrollbar relative">
-            <div className="max-w-5xl mx-auto space-y-8">
-              <section className="relative">
-                {/* Analytics at top */}
-                <Analytics user={user} />
-
-                {/* FileUploader in middle - full width */}
-                <div className="w-full">
-                  <FileUploader
-                    onUpload={handleFileUpload}
-                    isAnalyzing={isAnalyzing}
-                    userPerfects={user.perfects || 0}
-                    userStars={user.stars || 0}
-                    onDeductCurrency={(p, s) => setUser(prev => ({
-                      ...prev,
-                      perfects: Math.max(0, (prev.perfects || 0) - p),
-                      stars: Math.max(0, (prev.stars || 0) - s)
-                    }))}
-                    onSearchChange={setSearchQuery}
-                  />
+            <div className="max-w-5xl mx-auto space-y-8 relative z-10">
+              {/* Hero Section */}
+              <section className="flex flex-col md:flex-row gap-8 items-end p-6 bg-gradient-to-b from-transparent to-black/20 rounded-3xl">
+                {/* Hero Art */}
+                <div className="w-full md:w-56 md:h-56 aspect-square shrink-0 shadow-[0_20px_50px_rgba(0,0,0,0.5)] rounded-lg overflow-hidden relative group">
+                  {history.length > 0 && history[0].coverArt ? (
+                    <img src={history[0].coverArt} alt="Hero Cover" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full bg-zinc-800 flex items-center justify-center">
+                      <span className="text-4xl">🎵</span>
+                    </div>
+                  )}
                 </div>
 
-                {/* History List at bottom */}
+                {/* Hero Info */}
+                <div className="flex flex-col gap-4 w-full overflow-hidden">
+                  <span className="text-xs font-bold uppercase tracking-widest text-white/60">Last Played</span>
+                  <h1 className="text-4xl md:text-6xl font-black italic tracking-tighter text-white drop-shadow-xl truncate leading-none">
+                    {history.length > 0 ? history[0].fileName.replace(/\.[^/.]+$/, "") : "No History"}
+                  </h1>
+
+                  {/* Metadata Row */}
+                  <div className="flex flex-wrap items-center gap-2 text-sm font-bold text-white/80">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-6 h-6 rounded-full bg-purple-500/20 flex items-center justify-center border border-purple-500/30">
+                        <span className="text-[10px]">👤</span>
+                      </div>
+                      <span>{user.username || "Player"}</span>
+                    </div>
+                    <span className="text-white/20">•</span>
+                    <span>Lv. {user.level}</span>
+                    <span className="text-white/20">•</span>
+                    <span>{user.songsPlayed || 0} Songs Played</span>
+                    <span className="text-white/20">•</span>
+                    <span className="text-yellow-400">{user.perfects || 0} Gold</span>
+                  </div>
+
+                  {/* Actions Row */}
+                  <div className="flex items-center gap-4 mt-2">
+                    {/* Play Button */}
+                    <button
+                      onClick={() => history.length > 0 && handlePlayFromHistory(history[0])}
+                      className="w-14 h-14 rounded-full bg-green-500 text-black flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(34,197,94,0.4)]"
+                    >
+                      <svg className="w-6 h-6 ml-0.5 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                    </button>
+
+                    {/* Shuffle Button (Start Game Endless/Random) */}
+                    <button
+                      onClick={() => {
+                        if (history.length > 0) {
+                          // Pick random song
+                          const random = history[Math.floor(Math.random() * history.length)];
+                          handlePlayFromHistory(random); // Note: Game component handles mode if we want endless explicitly we might need to pass a prop or just let user switch. 
+                          // User asked for "Shuffle to start playing any random song (start playing game)"
+                          // Actually, simply picking a random song and starting is good enough.
+                        }
+                      }}
+                      className="p-3 rounded-full text-slate-400 hover:text-white transition-colors"
+                      title="Shuffle Play"
+                    >
+                      <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24"><path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z" /></svg>
+                    </button>
+
+                    {/* Add Song Button (+ input) */}
+                    <div className="relative">
+                      <button
+                        onClick={() => document.getElementById('hidden-file-input')?.click()}
+                        className="w-8 h-8 rounded-full border-2 border-slate-500 text-slate-500 flex items-center justify-center hover:border-white hover:text-white transition-all"
+                        title="Add Songs"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                      </button>
+                      {/* Hidden File Input Logic from FileUploader */}
+                      <input
+                        id="hidden-file-input"
+                        type="file"
+                        accept=".mp3,.wav"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) handleFileUpload(file);
+                          e.target.value = ''; // Reset
+                        }}
+                      />
+                    </div>
+
+                    {/* Settings Menu Button */}
+                    <button
+                      onClick={() => setScreen('settings')}
+                      className="p-3 text-slate-400 hover:text-white transition-colors"
+                    >
+                      <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24"><path d="M6 10c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm12 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm-6 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" /></svg>
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              {/* Currency Bar */}
+              <div className="px-4 pb-2">
+                <CurrencyBar
+                  user={user}
+                  hearts={hearts}
+                  shields={shields}
+                  onExchange={handleExchangeCurrency}
+                  onShowShop={() => setShowResourceMenu(true)}
+                  compact={false}
+                />
+              </div>
+
+              {/* History List Header */}
+              <div className="flex items-center justify-between px-4 pt-2 sticky top-0 z-10 py-2">
+                <h2 className="text-lg font-black italic text-white uppercase tracking-tighter">Your Tracks</h2>
+                <div className="relative group">
+                  <input
+                    type="text"
+                    placeholder="Search..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="bg-transparent text-right text-xs font-bold text-white placeholder:text-slate-600 focus:outline-none w-24 focus:w-40 transition-all"
+                  />
+                  <div className="absolute right-0 bottom-0 h-px w-full bg-white/10 group-focus-within:bg-white/50 transition-colors"></div>
+                </div>
+              </div>
+
+              {/* History List at bottom */}
+              <div className="px-2 pb-16">
                 <HistoryList
                   history={searchQuery ? history.filter(track =>
                     track.fileName.toLowerCase().includes(searchQuery.toLowerCase())
@@ -461,7 +670,7 @@ const App: React.FC = () => {
                   onSelect={handlePlayFromHistory}
                   onDelete={handleDeleteTrack}
                 />
-              </section>
+              </div>
             </div>
           </div >
         )}
@@ -495,6 +704,19 @@ const App: React.FC = () => {
           )
         }
       </main >
+
+      {/* Persistent Bottom Player */}
+      {screen !== 'game' && activeTrackForPlayer && (
+        <BottomPlayer
+          currentSong={activeTrackForPlayer}
+          isPlaying={audioState.isPlaying}
+          onPlayPause={handleGlobalPlayPause}
+          progress={audioState.progress}
+          currentTime={audioState.currentTime}
+          duration={audioState.duration || (activeAudioTrack ? 0 : 180)}
+          onSeek={handleGlobalSeek}
+        />
+      )}
 
       {/* Mobile Bottom Navigation */}
       {

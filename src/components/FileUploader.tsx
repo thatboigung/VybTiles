@@ -38,7 +38,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onUpload, isAnalyzin
   return (
     <>
       <div className="flex flex-col gap-3 mb-10">
-        <div className="flex gap-3 items-stretch h-14">
+        <div className="flex gap-3 items-stretch h-14 bg-white/5 border border-white/10 rounded-3xl">
           {/* Search Box - Flex Grow */}
           <div className="relative flex-1 group">
             <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
@@ -51,13 +51,13 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onUpload, isAnalyzin
               value={searchQuery}
               onChange={handleSearchChange}
               placeholder="Search your tracks..."
-              className="w-full h-full bg-white/5 border border-white/10 rounded-2xl pl-12 pr-4 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-white/20 focus:bg-white/10 transition-all shadow-inner"
+              className="w-full h-full bg-inherit  rounded-2xl pl-12 pr-4 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-white/20 focus:bg-white/10 transition-all shadow-inner"
             />
           </div>
 
           {/* Upload Button - Drop Zone */}
           <div
-            className={`w-16 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center cursor-pointer hover:bg-white/10 hover:border-white/20 transition-all active:scale-95 group relative overflow-hidden ${isDragging ? 'border-blue-500/50 bg-blue-500/10' : ''}`}
+            className={`w-16  flex items-center justify-center cursor-pointer hover:border-white/20 transition-all active:scale-95 group relative overflow-hidden ${isDragging ? 'border-blue-500/50 bg-blue-500/10' : ''}`}
             onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
             onDragLeave={() => setIsDragging(false)}
             onDrop={(e) => {

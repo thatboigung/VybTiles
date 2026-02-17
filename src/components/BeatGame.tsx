@@ -56,6 +56,8 @@ interface Note {
   id: string; time: number; lane: number; hit: boolean; missed: boolean;
   type: 'obstacle' | 'powerup' | 'tile'; powerUp: PowerUpType;
   hitTimestamp?: number; // Track when this note was hit
+  isMoving?: boolean; // New property for moving tiles
+  originalLane?: number; // Store original lane for moving tiles
 }
 
 interface Particle {
@@ -82,7 +84,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
   // Determine initial valid level
   const getInitialLevel = (): Level => {
-    if (userLevel >= 5) return 'medium'; // Easy disabled
+    if (userLevel >= 4) return 'medium'; // Easy locks at level 4
     return 'easy';
   };
 
@@ -134,11 +136,18 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   // Initialize shuffle queue for endless mode
   React.useEffect(() => {
     if (selectedMode === 'endless' && allSongs && allSongs.length > 0) {
+      // Filter out the current song from the shuffle initially to avoid immediate repeat if possible?
+      // Or just shuffle all. Let's shuffle all.
       const shuffled = [...allSongs].sort(() => Math.random() - 0.5);
       setShuffleQueue(shuffled);
       setQueueIndex(0);
     }
   }, [selectedMode, allSongs]);
+
+  const currentSong = selectedMode === 'endless' && shuffleQueue.length > 0
+    ? shuffleQueue[queueIndex]
+    : playlist[currentTrackIndex];
+
 
   // Auto-advance to next song in endless mode
   const loadNextSongInEndless = React.useCallback(() => {
@@ -273,12 +282,23 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     setTimeout(() => setInvincible(false), 2000);
   }, [invincible, isFailing]);
 
+  // Scale note speed based on *actual game height* (canvas height)
+  // Logic: 800px height = standard speed.
+  // We need access to current canvas height. Since this is called in render loop (via closure on state?), 
+  // actually getNoteSpeed is called in render. 
+  // Let's make getNoteSpeed read from canvasRef directly if available.
   const getNoteSpeed = () => {
-    // Base speed: Easy 400 (x1.0)
-    // Medium: 600 (x1.5)
-    // Hard: 800 (x2.0)
+    let height = 800;
+    if (canvasRef.current) {
+      height = canvasRef.current.height;
+    } else if (typeof window !== 'undefined') {
+      height = window.innerHeight;
+    }
+
+    // Base speed: Easy 400 (x1.0) -> Scaled by height ratio (reference 800px)
+    const heightScale = height / 800;
     const speeds: Record<Level, number> = { easy: 400, medium: 600, hard: 800 };
-    return speeds[selectedLevel];
+    return speeds[selectedLevel] * heightScale;
   };
 
   const handleHit = useCallback((lane: number, tapY?: number) => {
@@ -343,8 +363,8 @@ export const BeatGame: React.FC<BeatGameProps> = ({
           setCombo(c => { const n = c + 1; setMaxCombo(m => Math.max(m, n)); return n; });
           const bonus = combo >= 2 ? combo : 1;
           setSessionPerfects(p => p + bonus);
-          // Heavy shake for perfect hit
-          setShake(10);
+          // Heavy shake for perfect hit (Only shake for first 3 perfects to prevent lag)
+          if (combo < 3) setShake(10);
           showFeedback('PERFECT', 'text-yellow-400 drop-shadow-[0_0_15px_rgba(250,204,21,0.8)]', 1.5);
           spawnParticles(x, nY, '#facc15', 20); // Gold particles
         } else {
@@ -382,6 +402,15 @@ export const BeatGame: React.FC<BeatGameProps> = ({
         type = 'powerup';
       }
 
+      // Varying Tiles Logic (Moving Tiles)
+      // Only for non-powerups, chance based on difficulty or late game
+      // "Half the beat" logic -> Switch lanes every 2 beats
+      // Chance: 20% on Medium/Hard?
+      let isMoving = false;
+      if (type === 'tile' && (selectedLevel === 'medium' || selectedLevel === 'hard')) {
+        isMoving = Math.random() < 0.25;
+      }
+
       const lane1 = Math.floor(Math.random() * LANES);
       const notes: Note[] = [{
         id: `${analysis.id}-n-${index}-a`,
@@ -390,7 +419,9 @@ export const BeatGame: React.FC<BeatGameProps> = ({
         hit: false,
         missed: false,
         type,
-        powerUp: powerType
+        powerUp: powerType,
+        isMoving,
+        originalLane: lane1
       }];
 
       // Calculate song duration approximation (last beat)
@@ -428,7 +459,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   };
 
   // Move livesMap to a stable constant or useMemo if needed, but simple object is fine here
-  const livesMap: Record<Level, number> = { easy: 3, medium: 2, hard: 1 };
+  const livesMap: Record<Level, number> = { easy: 2, medium: 1, hard: 0 };
 
   const checkCanAfford = () => {
     const shieldCost = selectedMode === 'endless' ? 1 : livesMap[selectedLevel];
@@ -486,8 +517,11 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
     setActiveLives(selectedMode === 'endless' ? 1 : livesMap[selectedLevel]);
 
-    setCurrentTrackIndex(0);
-    loadTrackNotes(playlist[0]);
+    const startSong = selectedMode === 'endless' && shuffleQueue.length > 0 ? shuffleQueue[0] : playlist[0];
+    if (selectedMode === 'endless') setQueueIndex(0);
+    else setCurrentTrackIndex(0);
+
+    loadTrackNotes(startSong);
     particlesRef.current = [];
 
     setScore(0); setCombo(0); setMaxCombo(0); setSessionHearts(0); setSessionShields(0); setSessionPerfects(0); setPlayerLane(1);
@@ -495,7 +529,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
     // Immediate Start with Slow Motion Ramp
     if (audioRef.current) {
-      audioRef.current.src = playlist[0].fileUrl || '';
+      audioRef.current.src = startSong.fileUrl || '';
       audioRef.current.currentTime = 0;
       rampAudioToSpeed(1.0, 3000);
     }
@@ -520,19 +554,11 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
   const handleFinish = () => {
     if (selectedMode === 'endless') {
-      const nextIndex = (currentTrackIndex + 1) % playlist.length;
-      setCurrentTrackIndex(nextIndex);
-      loadTrackNotes(playlist[nextIndex]);
+      loadNextSongInEndless();
       showFeedback('SYNC EXTENDED', 'text-blue-400', 1.2);
-
-      if (audioRef.current) {
-        audioRef.current.src = playlist[nextIndex].fileUrl || '';
-        audioRef.current.currentTime = 0;
-        audioRef.current.play();
-      }
     } else {
-      // EXP Formula: 10000 points = 100 EXP (ratio 100:1)
-      const earned = Math.floor(score / 100);
+      // EXP Formula: Base 300 + Performance
+      const earned = 300 + (sessionPerfects * 10);
       setExpEarned(earned);
       setIsCleared(true);
       if (audioRef.current) audioRef.current.pause();
@@ -636,6 +662,26 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     setTimeout(() => startGame(), 0);
   };
 
+  // Handle Responsive Canvas Resize
+  // Uses ResizeObserver to track the container size instead of window
+  useEffect(() => {
+    if (!gameAreaRef.current || !canvasRef.current) return;
+
+    const resizeObserver = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        if (entry.target === gameAreaRef.current && canvasRef.current) {
+          const { width, height } = entry.contentRect;
+          canvasRef.current.width = width;
+          canvasRef.current.height = height;
+        }
+      }
+    });
+
+    resizeObserver.observe(gameAreaRef.current);
+
+    return () => resizeObserver.disconnect();
+  }, []);
+
   useEffect(() => {
     const canvas = canvasRef.current; if (!canvas) return;
     const ctx = canvas.getContext('2d'); if (!ctx) return;
@@ -668,7 +714,11 @@ export const BeatGame: React.FC<BeatGameProps> = ({
       ctx.translate((Math.random() - 0.5) * currentShake, (Math.random() - 0.5) * currentShake);
 
       ctx.clearRect(0, 0, w, h);
-      ctx.fillStyle = '#0a0a0a';
+      // Background Gradient
+      const bgGradient = ctx.createLinearGradient(0, 0, 0, h);
+      bgGradient.addColorStop(0, '#1e293b'); // slate-800
+      bgGradient.addColorStop(1, '#000000'); // black
+      ctx.fillStyle = bgGradient;
       ctx.fillRect(0, 0, w, h);
 
       // Rewind Logic during failure
@@ -732,6 +782,32 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
       // The `now` variable is already defined above, so we don't redefine it.
       notesRef.current.forEach((note) => {
+        // Handle Moving Tiles Logic
+        if (note.isMoving && !note.hit && !note.missed && note.originalLane !== undefined) {
+          // Switch lanes every 2 beats (Half BPM)
+          // Period = 2 * (60 / BPM)
+          const bpm = currentSong?.bpm || 120;
+          const beatDuration = 60 / bpm;
+          const switchPeriod = beatDuration * 2;
+
+          // Calculate vertical position Y to check if we should still move
+          // We need to calculate Y same as below
+          const timeToHit = note.time - displayTime;
+          const yPos = targetY - (timeToHit * speed);
+
+          // Stop moving if we are past the middle of the screen (0.5 * h)
+          // This gives the user time to react
+          if (yPos < h * 0.5) {
+            const switchState = Math.floor(displayTime / switchPeriod) % 2;
+
+            const targetLane = switchState === 0
+              ? note.originalLane
+              : (note.originalLane >= LANES - 1 ? note.originalLane - 1 : note.originalLane + 1);
+
+            note.lane = targetLane;
+          }
+        }
+
         if (note.missed) return;
 
         // Check for Simultaneous Sync Failure (Double Tiles)
@@ -905,7 +981,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
         isOpen={showTutorial}
         onClose={handleCloseTutorial}
       />
-      <div className="fixed inset-0 bg-[#0a0a0a] flex justify-center z-[100] select-none touch-none"
+      <div className="fixed inset-0 bg-[#121212] flex justify-center items-center z-[100] select-none touch-none"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={() => isDraggingRef.current = false}
@@ -916,220 +992,292 @@ export const BeatGame: React.FC<BeatGameProps> = ({
           onClose={() => setShowRechargeModal(false)}
         />
 
-        <div ref={gameAreaRef} className={`relative w-full max-w-[450px] h-full bg-[#0a0a0a] overflow-hidden 
+        <div ref={gameAreaRef} className={`relative w-full h-full 
+          lg:w-[480px] lg:h-full lg:rounded-none lg:border-x lg:border-white/10 lg:shadow-2xl lg:overflow-hidden
+          bg-transparent overflow-hidden 
           animate-in fade-in zoom-in-95 duration-200 
           ${isExiting ? 'animate-out fade-out zoom-out-95 duration-200 fill-mode-forwards' : ''}
         `}>
 
-          {/* HUD */}
-          <div className="absolute top-0 left-0 right-0 p-4 z-50 pointer-events-none flex flex-col gap-4">
-            <div className="flex justify-between items-start gap-4">
-              <div className="flex-1 flex flex-wrap gap-2">
-                {/* Score Display (Minimal) */}
-                <div className="flex flex-col items-start bg-black/40 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/5 shadow-xl w-fit">
-                  <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest leading-none mb-0.5">Score</span>
-                  <div className="text-2xl font-black text-white italic tabular-nums tracking-tighter leading-none">{score.toLocaleString()}</div>
-                </div>
+          {/* HUD - Spotify Inspired */}
+          <div className="absolute top-0 left-0 right-0 p-4 z-50 pointer-events-none flex flex-col gap-2">
 
-                {/* Gold / Perfects Display */}
-                <div className="flex items-center gap-2 bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/5 w-fit">
-                  <div className="w-1.5 h-1.5 rounded-full bg-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.6)]"></div>
-                  <span className="text-xs font-black text-yellow-100 tabular-nums tracking-tight">{sessionPerfects.toLocaleString()} <span className="text-[9px] text-yellow-500/80 ml-0.5">GOLD</span></span>
-                </div>
+            {/* Top Row: Art + Stats + Pause */}
+            <div className="flex items-center justify-between gap-3">
 
-                {/* Shields / Lives Display */}
-                <div className="flex items-center gap-2 bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/5 w-fit">
-                  <svg className="w-3 h-3 text-blue-400" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3z" />
-                  </svg>
-                  <span className="text-xs font-black text-blue-100 tabular-nums tracking-tight">{activeLives} <span className="text-[9px] text-blue-500/80 ml-0.5">LIVES</span></span>
-                </div>
-              </div>
-
-              {/* Combo Display (Centered/Right aligned dynamically) */}
-              {combo > 1 && (
-                <div className="absolute top-16 left-1/2 -translate-x-1/2 flex flex-col items-center animate-in zoom-in-50 slide-in-from-bottom-2 fade-in duration-200">
-                  <span className="text-5xl font-black text-white italic leading-none drop-shadow-[0_0_15px_rgba(255,255,255,0.3)] tracking-tighter">{combo}</span>
-                  <span className="text-[10px] font-black text-transparent bg-clip-text bg-gradient-to-t from-slate-400 to-white uppercase tracking-[0.3em]">COMBO</span>
-                </div>
-              )}
-
-              {/* Pause Button */}
-              <button onClick={() => { setIsPaused(true); audioRef.current?.pause(); }} className="w-10 h-10 bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center pointer-events-auto rounded-xl text-white/70 hover:text-white hover:bg-white/10 transition-all active:scale-95">
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
-              </button>
-            </div>
-
-            <div className="relative w-full px-2">
-              <div className="flex justify-between items-center mb-1.5 px-1">
-                <span className="text-[8px] font-black text-white/40 uppercase tracking-[0.2em] italic truncate max-w-[150px]">{playlist[currentTrackIndex]?.fileName}</span>
-                {selectedMode === 'endless' && (
-                  <span className="text-[8px] font-black text-blue-400 uppercase tracking-widest bg-blue-400/10 px-2 py-0.5 rounded-full border border-blue-400/20">TRACK {currentTrackIndex + 1}/{playlist.length}</span>
+              {/* Left: Cover Art (Square) */}
+              <div className="flex-shrink-0">
+                {currentSong?.coverArt ? (
+                  <div className="w-16 h-16 rounded-xl overflow-hidden border border-white/10 shadow-2xl shrink-0 relative group">
+                    {/* Playing Indicator Overlay */}
+                    <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                      <div className="flex gap-1">
+                        <div className="w-1 h-3 bg-green-500 rounded-full animate-[bounce_1s_infinite]" />
+                        <div className="w-1 h-4 bg-green-500 rounded-full animate-[bounce_1.2s_infinite]" />
+                        <div className="w-1 h-2 bg-green-500 rounded-full animate-[bounce_0.8s_infinite]" />
+                      </div>
+                    </div>
+                    <img src={currentSong.coverArt} alt="Cover" className="w-full h-full object-cover" />
+                  </div>
+                ) : (
+                  <div className="w-16 h-16 rounded-xl bg-zinc-800 border border-white/10 flex items-center justify-center shadow-2xl">
+                    <span className="text-2xl">🎵</span>
+                  </div>
                 )}
               </div>
-              <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden shadow-inner">
-                <div ref={progressBarRef} className="h-full bg-white transition-none" style={{ width: '0%' }}></div>
-              </div>
 
+              {/* Right: Stats Pills Row */}
+              {/* Right: Unified Stats & Progress Card */}
+              <div className="flex-1 min-w-0 bg-[#3333]/80 backdrop-blur-md  rounded-2xl overflow-hidden flex flex-col shadow-xl">
 
-              <div className="absolute top-1/2 -translate-y-1/2 left-2 right-2 pointer-events-none mt-2">
-                <div className="absolute -translate-x-1/2" style={{ left: '25%' }}>
-                  <StarIcon active={currentTimeRef.current / durationRef.current >= 0.25} className="w-5 h-5" />
+                {/* Top: Song Info & Stats */}
+                <div className="flex items-center justify-between px-3 py-2 gap-3">
+
+                  {/* Song Title (Left) */}
+                  <div className="flex flex-col overflow-hidden mr-auto">
+                    <h3 className="text-xs font-black italic text-white uppercase tracking-wide truncate">
+                      {currentSong?.fileName.replace(/\.[^/.]+$/, "")}
+                    </h3>
+                    <div className="flex items-center gap-2">
+                      {selectedMode === 'endless' && (
+                        <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">
+                          TRK {queueIndex + 1}
+                        </span>
+                      )}
+                      <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">
+                        {(completion)}%
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Stats (Right) */}
+                  <div className="flex items-center gap-3 shrink-0">
+
+                    {/* Score */}
+                    <div className="flex flex-col items-end">
+                      <span className="text-[7px] font-bold text-slate-500 uppercase tracking-widest leading-none mb-0.5">SCORE</span>
+                      <span className="text-lg font-black italic text-white leading-none tracking-tighter">{score.toLocaleString()}</span>
+                    </div>
+
+                    {/* Divider */}
+                    <div className="w-px h-4 bg-white/10"></div>
+
+                    {/* Gold */}
+                    <div className="flex flex-col items-end">
+                      <span className="text-[7px] font-bold text-yellow-500 uppercase tracking-widest leading-none mb-0.5">GOLD</span>
+                      <span className="text-lg font-black italic text-white leading-none tracking-tighter">{sessionPerfects}</span>
+                    </div>
+
+                    {/* Pause Button */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsPaused(true);
+                        audioRef.current?.pause();
+                      }}
+                      className="w-8 h-8 flex items-center justify-center bg-white/5 hover:bg-white/10 rounded-full transition-colors ml-1 active:scale-95 pointer-events-auto"
+                    >
+                      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M10 9v6m4-6v6" /></svg>
+                    </button>
+                  </div>
                 </div>
-                <div className="absolute -translate-x-1/2" style={{ left: '50%' }}>
-                  <StarIcon active={currentTimeRef.current / durationRef.current >= 0.5} className="w-5 h-5" />
-                </div>
-                <div className="absolute -translate-x-1/2" style={{ left: '100%' }}>
-                  <StarIcon active={currentTimeRef.current / durationRef.current >= 0.99} className="w-6 h-6" />
+
+                {/* Bottom: Progress Bar (Integrated) */}
+                <div className="h-1 w-full bg-white/5 relative">
+                  <div ref={progressBarRef} className="h-full bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 transition-none" style={{ width: '0%' }}></div>
                 </div>
               </div>
             </div>
+
+
+
+            {/* Combo Display (floating) */}
+            {combo > 1 && (
+              <div className="absolute top-24 right-4 flex flex-col items-end animate-in zoom-in-50 slide-in-from-right-8 fade-in duration-200 pointer-events-none">
+                <span className="text-5xl font-black text-white italic leading-none drop-shadow-[0_0_15px_rgba(255,255,255,0.3)] tracking-tighter">{combo}</span>
+                <span className="text-[8px] font-black text-white/50 uppercase tracking-[0.3em]">COMBO</span>
+              </div>
+            )}
+
           </div>
 
           <canvas ref={canvasRef} width={450} height={800} className="w-full h-full" />
 
           {/* Countdown Overlay */}
           {/* Countdown removed */}    {/* Start Overlay */}
+          {/* Start Overlay - Spotify Style */}
           {!isActive && !isCleared && !isGameOver && (
-            <div className="absolute inset-0 bg-[#0a0a0a]/95 flex flex-col items-center justify-center p-8 z-[110] text-center">
+            <div className="absolute inset-0 bg-[#121212] flex flex-col items-center z-[110]">
+              {/* Blurred Background Art */}
+              {currentSong?.coverArt && (
+                <div className="absolute inset-0 opacity-30 blur-3xl scale-125 pointer-events-none">
+                  <img src={currentSong.coverArt} className="w-full h-full object-cover" />
+                  <div className="absolute inset-0 bg-gradient-to-b from-[#121212]/50 via-[#121212]/80 to-[#121212]"></div>
+                </div>
+              )}
 
-              {/* Top Wallet Bar */}
-              <div className="absolute top-0 left-0 right-0 p-6 flex justify-between items-start">
-                <button onClick={handleAbort} className="text-xs font-black text-slate-500 uppercase tracking-widest hover:text-white transition-colors flex items-center gap-2 group">
-                  <span className="group-hover:-translate-x-1 transition-transform">←</span> ABORT
+              {/* Top Bar (Abort & Resources) */}
+              <div className="w-full p-6 flex justify-between items-center relative z-20">
+                <button onClick={handleAbort} className="w-10 h-10 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center text-white hover:bg-white/10 transition-all">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                 </button>
-                <div className="flex gap-4">
-                  <div className="flex flex-col items-end">
 
-                    <div className="flex items-center gap-3 bg-white/5 px-3 py-1.5 rounded-full border border-white/10">
-                      <span className="text-sm font-black text-white">{globalHearts} <span className="text-xs text-red-500">❤️</span></span>
-                      <div className="w-px h-3 bg-white/10"></div>
-                      <span className="text-sm font-black text-white">{globalShields} <span className="text-xs text-blue-500">🛡️</span></span>
-                    </div>
-                  </div>
+                <div className="flex items-center gap-2 bg-black/40 backdrop-blur-md px-4 py-2 rounded-full border border-white/5">
+                  <span className="text-xs font-bold text-white flex items-center gap-1">{globalHearts}<span className="text-red-500 text-[10px]">❤️</span></span>
+                  <div className="w-px h-3 bg-white/10"></div>
+                  <span className="text-xs font-bold text-white flex items-center gap-1">{globalShields}<span className="text-blue-500 text-[10px]">🛡️</span></span>
                 </div>
               </div>
 
-              {/* Kinetic Typography Title */}
-              <div key={selectedMode} className="mb-12 animate-in fade-in zoom-in-95 duration-500">
-                <h2 className="text-5xl font-black italic text-white uppercase tracking-tighter " style={{ textShadow: '0 0 30px rgba(255,255,255,0.1)' }}>
-                  {selectedMode === 'endless' ? 'Endless Protocol' : 'Start Game'}
-                </h2>
-                <div className="h-1 w-24 bg-gradient-to-r from-transparent via-purple-500 to-transparent mx-auto mt-4 rounded-full opacity-50"></div>
-              </div>
+              {/* Main Content */}
+              <div className="flex-1 w-full flex flex-col items-center justify-center relative z-20 px-8 pb-12 gap-8">
 
-              <div className="w-full max-w-xs space-y-8">
-                <div className="space-y-5">
-                  <div className="space-y-2">
-                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest text-left pl-1">Game Mode</p>
-                    <div className="flex gap-2 p-1 bg-white/5 border border-white/10 rounded-xl">
+                {/* Album Art & Title */}
+                <div className="flex flex-col items-center gap-4 text-center">
+                  <div className="w-48 h-48 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden border border-white/10 relative group">
+                    {currentSong?.coverArt ? (
+                      <img src={currentSong.coverArt} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
+                    ) : (
+                      <div className="w-full h-full bg-zinc-800 flex items-center justify-center"><span className="text-4xl">🎵</span></div>
+                    )}
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-black text-white italic tracking-tighter leading-tight drop-shadow-lg max-w-[300px] mx-auto">
+                      {currentSong?.fileName.replace(/\.[^/.]+$/, "")}
+                    </h2>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Ready to Sync</p>
+                  </div>
+                </div>
+
+                {/* Settings Container */}
+                <div className="w-full max-w-xs space-y-6">
+
+                  {/* Selectors */}
+                  <div className="flex flex-col gap-4">
+                    <div className="bg-[#181818] p-1 rounded-lg flex">
                       {['classic', 'endless'].map(m => (
-                        <button key={m} onClick={() => setSelectedMode(m as any)} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${selectedMode === m ? 'bg-white text-black shadow-lg scale-105' : 'text-slate-500 hover:text-slate-300'}`}>{m}</button>
+                        <button
+                          key={m}
+                          onClick={() => setSelectedMode(m as any)}
+                          className={`flex-1 py-2 text-[10px] font-black uppercase rounded-md transition-all ${selectedMode === m ? 'bg-[#282828] text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+                        >
+                          {m}
+                        </button>
                       ))}
                     </div>
-                  </div>
 
-                  <div className="space-y-2">
-                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest text-left pl-1">Difficulty</p>
-                    <div className="flex gap-2 p-1 bg-white/5 border border-white/10 rounded-xl">
+                    <div className="bg-[#181818] p-1 rounded-lg flex">
                       {['easy', 'medium', 'hard'].map(level => {
                         const l = level as Level;
-                        let isLocked = false;
-                        let lockReason = "";
-
-                        if (l === 'easy' && userLevel >= 5) {
-                          isLocked = true;
-                          lockReason = "Max Level Exceeded";
-                        } else if (l === 'medium' && userLevel < 3) {
-                          isLocked = true;
-                          lockReason = "Unlock at Lv.3";
-                        } else if (l === 'hard' && userLevel < 5) { // Assuming Hard unlocks at Lv 5
-                          isLocked = true;
-                          lockReason = "Unlock at Lv.5";
-                        }
+                        // Logic: Easy locks at L4. Medium unlocks L2. Hard unlocks L4.
+                        const isLocked = (l === 'easy' && userLevel >= 4) || (l === 'medium' && userLevel < 2) || (l === 'hard' && userLevel < 4);
 
                         return (
                           <button
                             key={l}
                             onClick={() => !isLocked && setSelectedLevel(l)}
-                            disabled={isLocked}
-                            className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all relative overflow-hidden
-                              ${selectedLevel === l
-                                ? 'bg-white text-black shadow-lg scale-105 z-10'
-                                : isLocked
-                                  ? 'bg-zinc-900/50 text-zinc-700 cursor-not-allowed border border-white/5'
-                                  : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'
-                              }`}
+                            className={`flex-1 py-2 text-[10px] font-black uppercase rounded-md transition-all relative ${selectedLevel === l ? 'bg-[#282828] text-white shadow-sm' : isLocked ? 'opacity-30 cursor-not-allowed text-zinc-600' : 'text-zinc-500 hover:text-zinc-300'}`}
                           >
-                            <span className={isLocked ? 'opacity-0' : ''}>{l}</span>
-                            {isLocked && (
-                              <div className="absolute inset-0 flex items-center justify-center bg-black/80">
-                                <span className="text-[7px] text-zinc-500 font-bold leading-tight px-1">{lockReason || "LOCKED"}</span>
-                              </div>
-                            )}
+                            {l} {isLocked && <span className="absolute -top-1 -right-1 text-[8px]">🔒</span>}
                           </button>
                         );
                       })}
                     </div>
                   </div>
-                </div>
 
-                <div className="space-y-2 pt-4">
+                  {/* Play Button */}
                   {(() => {
                     const { canAfford } = checkCanAfford();
                     return (
                       <button
                         onClick={canAfford ? startGame : undefined}
-                        className={`w-full py-5 font-black text-xl italic uppercase rounded-2xl transition-all flex flex-col items-center justify-center gap-1 shadow-2xl
-                          ${canAfford
-                            ? "bg-white text-black hover:scale-[1.02] active:scale-95"
-                            : "bg-red-900/20 text-red-500 border border-red-500/30 cursor-not-allowed"
-                          }`}
+                        className={`w-full py-4 rounded-full font-black text-sm uppercase tracking-widest transition-all transform active:scale-95 shadow-xl flex items-center justify-center gap-2
+                              ${canAfford ? 'bg-[#1ed760] text-black hover:bg-[#1fdf64] hover:scale-105' : 'bg-red-900/20 text-red-500 border border-red-500/20 cursor-not-allowed'}`}
                       >
-                        <span>{canAfford ? "" : "Insufficient Resources"}</span>
-                        <svg className="w-6 h-6 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M8 5v14l11-7z" />
-                        </svg>
+                        {canAfford ? 'START' : 'INSUFFICIENT FUNDS'}
                       </button>
                     );
                   })()}
                 </div>
+
               </div>
             </div>
           )}
 
           {/* Results/Overlays */}
+          {/* Pause Overlay - Spotify Style */}
+          {isPaused && !isGameOver && !isCleared && (
+            <div className="absolute inset-0 bg-[#121212]/95 backdrop-blur-xl flex flex-col items-center justify-center z-[120]">
+              <div className="flex flex-col gap-6 items-center w-full max-w-xs">
+                <h2 className="text-4xl font-black text-white italic tracking-tighter uppercase mb-4">Paused</h2>
+
+                <button
+                  onClick={() => { setIsPaused(false); audioRef.current?.play(); }}
+                  className="w-full py-4 rounded-full bg-white text-black font-black text-sm uppercase tracking-widest hover:scale-105 transition-transform"
+                >
+                  Resume
+                </button>
+
+                <button
+                  onClick={restartSession}
+                  className="w-full py-4 rounded-full bg-transparent border border-white/20 text-white font-bold text-sm uppercase tracking-widest hover:bg-white/10 transition-colors"
+                >
+                  Restart
+                </button>
+
+                <button
+                  onClick={handleAbort}
+                  className="text-xs font-bold text-slate-500 uppercase tracking-widest hover:text-white transition-colors mt-4"
+                >
+                  Quit Game
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Game Over Screen - Spotify Style */}
           {isGameOver && (
-            <div className="absolute inset-0 backdrop-blur-xl flex flex-col items-center justify-end pb-24 md:justify-center md:pb-0 z-[120] animate-in fade-in duration-300">
-              <div className="p-8 rounded-2xl text-center w-full max-w-sm ring-1 ring-white/5 relative overflow-hidden animate-in slide-in-from-bottom-10 duration-300">
-                {/* Decorative glow */}
-                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-32 bg-red-500/10 rounded-full blur-[50px] pointer-events-none"></div>
+            <div className="absolute inset-0 bg-[#121212]/95 backdrop-blur-xl flex flex-col items-center justify-center p-6 z-[120] animate-in fade-in duration-300">
+              {/* Album Art Blur Background */}
+              {currentSong?.coverArt && (
+                <div className="absolute inset-0 opacity-20 blur-3xl scale-125 pointer-events-none">
+                  <img src={currentSong.coverArt} className="w-full h-full object-cover grayscale" />
+                </div>
+              )}
 
-                <h3 className="text-4xl font-black italic text-red-500 uppercase mb-6 tracking-tighter drop-shadow-[0_0_15px_rgba(239,68,68,0.5)] relative z-10 animate-pulse">Game Over</h3>
+              <div className="max-w-sm w-full relative z-10 flex flex-col items-center gap-6">
+                <h3 className="text-5xl font-black italic text-white uppercase tracking-tighter drop-shadow-xl">Game Over</h3>
 
-                {/* Stats Grid - Unified with Success Screen */}
-                <div className="w-full bg-white/5 rounded-2xl p-6 mb-6 border border-white/5 relative z-10">
-                  <div className="grid grid-cols-2 gap-6 text-center">
-                    <div>
-                      <p className="text-[9px] font-black text-slate-500 uppercase mb-1 tracking-widest">Salvage</p>
-                      <div className="flex flex-col gap-1">
-                        <span className="text-xl font-black text-white italic">+{sessionHearts}<span className="text-red-500 text-lg ml-0.5">❤️</span></span>
-                        <span className="text-xl font-black text-white italic">+{sessionShields}🛡️</span>
-                      </div>
-                    </div>
-                    <div>
-                      <p className="text-[9px] font-black text-slate-500 uppercase mb-1 tracking-widest">Growth</p>
-                      <span className="text-2xl font-black text-white italic">+{expEarned} <span className="text-xs text-slate-500 ml-0.5">EXP</span></span>
-                    </div>
+                {/* Song Info */}
+                <div className="text-center">
+                  <p className="text-sm font-bold text-white/60 uppercase tracking-widest">Session Ended</p>
+                  <h4 className="text-xl font-black text-white italic truncate max-w-[250px]">{currentSong?.fileName.replace(/\.[^/.]+$/, "")}</h4>
+                </div>
+
+                {/* Stats Card */}
+                <div className="w-full bg-[#181818] border border-white/5 rounded-2xl p-6 flex flex-col gap-4 shadow-2xl">
+                  <div className="flex justify-between items-center border-b border-white/5 pb-4">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Score</span>
+                    <span className="text-2xl font-black text-white italic">{score.toLocaleString()}</span>
                   </div>
-
-                  <div className="mt-4 pt-4 border-t border-white/5 text-center">
-                    <p className="text-[9px] font-black text-slate-500 uppercase mb-1 tracking-widest">Completion</p>
-                    <span className="text-lg font-black text-purple-400 italic">{completion}%</span>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Progress</span>
+                    <span className="text-lg font-black text-white italic">{completion}%</span>
+                  </div>
+                  <div className="flex gap-2 mt-2">
+                    <div className="flex-1 bg-white/5 rounded-lg p-2 text-center">
+                      <span className="block text-xl font-black text-white">{sessionHearts}<span className="text-red-500 text-sm">❤️</span></span>
+                      <span className="text-[9px] font-bold text-slate-500 uppercase">Salvage</span>
+                    </div>
+                    <div className="flex-1 bg-white/5 rounded-lg p-2 text-center">
+                      <span className="block text-xl font-black text-white">{expEarned}<span className="text-blue-400 text-sm">XP</span></span>
+                      <span className="text-[9px] font-bold text-slate-500 uppercase">Growth</span>
+                    </div>
                   </div>
                 </div>
 
-                <div className="space-y-4 relative z-10">
+                {/* Actions */}
+                <div className="w-full space-y-3">
                   {/* Revive Button */}
                   {(() => {
                     const goldCost = 50 * (reviveCount + 1);
@@ -1139,36 +1287,36 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                       <button
                         onClick={handleRevive}
                         disabled={!canAffordRevive}
-                        className={`w-full py-4 font-black text-lg uppercase italic rounded-xl transition-all flex items-center justify-center gap-2 border-2
-                          ${canAffordRevive
-                            ? "bg-yellow-600 text-white border-yellow-400 shadow-[0_0_15px_rgba(234,179,8,0.5)] hover:scale-105 active:scale-95"
-                            : "bg-zinc-800 text-zinc-600 border-zinc-700 cursor-not-allowed opacity-50"
+                        className={`w-full py-4 rounded-full font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 transition-all
+                           ${canAffordRevive
+                            ? "bg-yellow-500 text-black hover:bg-yellow-400 hover:scale-105 shadow-lg shadow-yellow-500/20"
+                            : "bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-50"
                           }`}
                       >
                         <span>Revive</span>
-                        <span className="text-xs font-normal opacity-80 bg-black/20 px-2 py-0.5 rounded">
-                          {goldCost} Gold + 2🛡️
+                        <span className="text-[10px] bg-black/20 px-1.5 py-0.5 rounded font-bold">
+                          {goldCost}G + 2🛡️
                         </span>
                       </button>
                     );
                   })()}
 
+                  {/* Retry Button */}
                   {(() => {
                     const { canAfford, shieldCost } = checkCanAfford();
                     return (
                       <button
                         onClick={canAfford ? restartSession : undefined}
                         disabled={!canAfford}
-                        className={`w-full py-5 font-black text-xl uppercase italic rounded-xl transition-all flex flex-col items-center justify-center gap-1 border-2
-                          ${canAfford
-                            ? "bg-white text-black border-white shadow-[4px_4px_0_0_#333] hover:shadow-[6px_6px_0_0_#333] hover:-translate-y-0.5 active:translate-y-[2px] active:shadow-none active:scale-95"
-                            : "bg-zinc-800 text-zinc-600 border-zinc-700 cursor-not-allowed opacity-80"
+                        className={`w-full py-4 rounded-full font-black text-sm uppercase tracking-widest transition-all flex flex-col items-center justify-center leading-none gap-1
+                           ${canAfford
+                            ? "bg-white text-black hover:scale-105"
+                            : "bg-zinc-800 text-zinc-500 cursor-not-allowed"
                           }`}
-                        style={canAfford ? { animation: `rhythmic-pulse ${60 / (playlist[currentTrackIndex]?.bpm || 128)}s ease-in-out infinite` } : {}}
                       >
-                        <span>{canAfford ? "Retry Sync" : "Low Signal"}</span>
-                        <span className="text-[9px] opacity-60 tracking-widest font-normal">
-                          {canAfford ? `COST: 2❤️ ${shieldCost}🛡️` : "INSUFFICIENT ENERGY"}
+                        <span>Retry Sync</span>
+                        <span className="text-[9px] font-bold opacity-60">
+                          {canAfford ? `COST: 2❤️ ${shieldCost}🛡️` : "Low Energy"}
                         </span>
                       </button>
                     );
@@ -1176,121 +1324,76 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
                   <button
                     onClick={handleClaimAwards}
-                    className="w-full py-4 text-zinc-400 font-black text-xs uppercase italic tracking-widest bg-transparent border-2 border-white/5 rounded-xl hover:text-white hover:border-white/20 transition-all active:scale-95 group"
+                    className="w-full py-4 text-xs font-bold text-slate-500 uppercase tracking-widest hover:text-white transition-colors"
                   >
-                    <span className="group-hover:translate-x-1 transition-transform inline-block">Claim & Exit</span>
+                    Claim Rewards & Exit
                   </button>
                 </div>
               </div>
             </div>
           )}
 
+          {/* Success Screen - Spotify Style */}
           {isCleared && (
-            <div className="absolute inset-0 backdrop-blur-xl flex flex-col items-center justify-center p-6 z-[130] animate-in fade-in duration-300">
-              <div className="w-full max-w-sm  p-8 rounded-2xl flex flex-col items-center shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-300">
-                {/* Decorative glow */}
-                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-32 bg-yellow-500/10 rounded-full blur-[50px] pointer-events-none"></div>
+            <div className="absolute inset-0 bg-[#121212]/95 backdrop-blur-xl flex flex-col items-center justify-center p-6 z-[130] animate-in fade-in duration-300">
+              {/* Confetti / Glow */}
+              <div className="absolute inset-0 overflow-hidden pointer-events-none">
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-green-500/10 rounded-full blur-[80px]"></div>
+              </div>
 
-                <div className="flex gap-2 mb-6 relative z-10">
-                  <StarIcon active={true} className="w-8 h-8 drop-shadow-[0_0_10px_rgba(234,179,8,0.5)]" />
-                  <StarIcon active={true} className="w-10 h-10 -translate-y-2 drop-shadow-[0_0_15px_rgba(234,179,8,0.6)]" />
-                  <StarIcon active={true} className="w-8 h-8 drop-shadow-[0_0_10px_rgba(234,179,8,0.5)]" />
+              <div className="max-w-sm w-full relative z-10 flex flex-col items-center gap-6">
+                {/* Stars */}
+                <div className="flex gap-2">
+                  <StarIcon active={true} className="w-8 h-8 text-yellow-400 drop-shadow-[0_0_10px_rgba(250,204,21,0.5)] animate-[bounce_1s_infinite]" />
+                  <StarIcon active={true} className="w-10 h-10 text-yellow-400 drop-shadow-[0_0_15px_rgba(250,204,21,0.6)] -translate-y-2 animate-[bounce_1.2s_infinite]" />
+                  <StarIcon active={true} className="w-8 h-8 text-yellow-400 drop-shadow-[0_0_10px_rgba(250,204,21,0.5)] animate-[bounce_0.8s_infinite]" />
                 </div>
-                <h3 className="text-4xl font-black italic text-yellow-500 uppercase mb-8 tracking-tighter drop-shadow-[0_0_15px_rgba(234,179,8,0.4)] relative z-10 animate-jump-in">Sync Success</h3>
 
-                <div className="w-full bg-white/5 rounded-2xl p-6 mb-8 border border-white/5 relative z-10">
-                  <div className="grid grid-cols-2 gap-6 text-center">
-                    <div>
-                      <p className="text-[9px] font-black text-slate-500 uppercase mb-1 tracking-widest">Rewards</p>
-                      <div className="flex flex-col gap-1">
-                        <span className="text-2xl font-black text-white italic">+{sessionHearts + 1}<span className="text-red-500 text-lg ml-0.5">❤️</span></span>
-                        {/* Star Reward Display */}
-                        {(completion >= 50) && (
-                          <span className="text-xl font-black text-yellow-400 italic">+{completion >= 100 ? 10 : 5}⭐</span>
-                        )}
-                        <span className="text-[9px] font-bold text-slate-500 tracking-tighter">(Bonus Included)</span>
-                      </div>
-                    </div>
-                    <div>
-                      <p className="text-[9px] font-black text-slate-500 uppercase mb-1 tracking-widest">Growth</p>
-                      <span className="text-2xl font-black text-white italic">+{animatedExp} <span className="text-xs text-slate-500 ml-0.5">EXP</span></span>
+                <h3 className="text-5xl font-black italic text-white uppercase tracking-tighter drop-shadow-xl animate-in zoom-in-0 duration-500">Sync Complete</h3>
+
+                {/* Song Info */}
+                <div className="text-center">
+                  <p className="text-sm font-bold text-green-400 uppercase tracking-widest mb-1">Perfect Synchronization</p>
+                  <h4 className="text-xl font-black text-white italic truncate max-w-[250px]">{currentSong?.fileName.replace(/\.[^/.]+$/, "")}</h4>
+                </div>
+
+                {/* Stats Card */}
+                <div className="w-full bg-[#181818] border border-white/5 rounded-2xl p-6 flex flex-col gap-4 shadow-2xl">
+                  {/* Rewards Row */}
+                  <div className="flex justify-between items-center border-b border-white/5 pb-4">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Rewards</span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xl font-black text-white">+{sessionHearts + 1}<span className="text-red-500 text-base ml-0.5">❤️</span></span>
+                      {(completion >= 50) && (
+                        <span className="text-xl font-black text-yellow-400">+{completion >= 100 ? 10 : 5}⭐</span>
+                      )}
                     </div>
                   </div>
 
-                  {/* Level Bar Animation */}
-                  <div className="mt-6 pt-6 border-t border-white/5 space-y-2">
+                  {/* Level Progress */}
+                  <div className="space-y-2">
                     <div className="flex justify-between items-end">
                       <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Level {Math.floor((currentExp + animatedExp) / 10000) + 1}</span>
+                      <span className="text-[10px] font-bold text-blue-400">+{animatedExp} XP</span>
                     </div>
                     <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden relative">
-                      {/* Previous Progress (Ghost) */}
-                      <div className="absolute top-0 left-0 h-full bg-white/20" style={{ width: `${(currentExp % 10000) / 100}%` }}></div>
-                      {/* New Progress (Fill) */}
-                      <div className="absolute top-0 left-0 h-full bg-blue-500 transition-all duration-300 ease-out" style={{ width: `${((currentExp + animatedExp) % 10000) / 100}%` }}></div>
-                    </div>
-                    <div className="flex justify-between items-center text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">
-                      <span>Total EXP: {currentExp + animatedExp}</span>
-                      <span className="text-white tabular-nums">{(currentExp + animatedExp) % 10000} / 10000 EXP</span>
-                    </div>
-                  </div>
-
-                  <div className="mt-6 pt-6 border-t border-white/5 grid grid-cols-3 gap-4 text-center">
-                    <div>
-                      <p className="text-[9px] font-black text-slate-500 uppercase mb-1 tracking-widest">Gold</p>
-                      <span className="text-lg font-black text-yellow-400 italic">+{sessionPerfects}💰</span>
-                    </div>
-                    <div>
-                      <p className="text-[9px] font-black text-slate-500 uppercase mb-1 tracking-widest">Peak Sync</p>
-                      <span className="text-lg font-black text-blue-400 italic">{maxCombo} COMBO</span>
-                    </div>
-                    <div>
-                      <p className="text-[9px] font-black text-slate-500 uppercase mb-1 tracking-widest">Salvage</p>
-                      <span className="text-lg font-black text-blue-500 italic">+{sessionShields}🛡️</span>
+                      <div className="absolute top-0 left-0 h-full bg-blue-500 transition-all duration-1000 ease-out" style={{ width: `${((currentExp + animatedExp) % 10000) / 100}%` }}></div>
                     </div>
                   </div>
                 </div>
 
-                <button onClick={handleClaimAwards} className="w-full py-5 bg-white text-black font-black text-xl uppercase italic rounded-xl shadow-[4px_4px_0_0_#333] hover:shadow-[6px_6px_0_0_#333] hover:-translate-y-0.5 active:translate-y-[2px] active:shadow-none active:scale-95 transition-all relative z-10 group">
-                  <span className="group-active:scale-90 inline-block transition-transform">Claim Awards</span>
+                {/* Main Action */}
+                <button
+                  onClick={handleClaimAwards}
+                  className="w-full py-4 rounded-full bg-[#1ed760] text-black font-black text-sm uppercase tracking-widest hover:bg-[#1fdf64] hover:scale-105 transition-all shadow-[0_0_20px_rgba(30,215,96,0.4)]"
+                >
+                  Claim Rewards
                 </button>
-
-                {/* Fly-out Animations */}
-                {isFlyoutAnimating && (
-                  <div className="fixed inset-0 pointer-events-none z-[200]">
-                    {/* Hearts Flyout */}
-                    {[...Array(Math.min(5, sessionHearts + 1))].map((_, i) => (
-                      <div key={`heart-${i}`} className="absolute top-1/2 left-1/2 text-2xl animate-fly-to-wallet-heart" style={{ animationDelay: `${i * 0.1}s` }}>❤️</div>
-                    ))}
-                    {/* Shields Flyout */}
-                    {[...Array(Math.min(5, sessionShields))].map((_, i) => (
-                      <div key={`shield-${i}`} className="absolute top-1/2 left-1/2 text-2xl animate-fly-to-wallet-shield" style={{ animationDelay: `${i * 0.1}s` }}>🛡️</div>
-                    ))}
-                    {/* Stars/EXP Flyout */}
-                    {[...Array(5)].map((_, i) => (
-                      <div key={`star-${i}`} className="absolute top-1/2 left-1/2 text-xs font-black text-yellow-400 animate-fly-to-wallet-exp" style={{ animationDelay: `${i * 0.05}s` }}>⭐</div>
-                    ))}
-                  </div>
-                )}
               </div>
             </div>
           )}
 
-          {isPaused && (
-            <div className="absolute inset-0 backdrop-blur-xl flex flex-col items-center justify-center z-[140] animate-in fade-in duration-200">
-              <div className="w-80  p-8 rounded-[2rem] text-center shadow-2xl animate-in zoom-in-95 duration-200 relative overflow-hidden">
-                {/* Decorative glow */}
-                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-40 h-40  rounded-full blur-[60px] pointer-events-none"></div>
-
-                <h2 className="text-3xl font-black italic text-white uppercase mb-8 tracking-tighter relative z-10">game Paused</h2>
-                <div className="space-y-3 relative z-10">
-                  <button onClick={() => { setIsPaused(false); rampAudioToSpeed(1.0, 3000); }} className="w-full py-4 bg-white text-black font-black text-lg uppercase italic rounded-xl shadow-[4px_4px_0_0_#333] hover:shadow-[6px_6px_0_0_#333] hover:-translate-y-0.5 active:translate-y-[2px] active:shadow-none active:scale-95 transition-all">Resume</button>
-                  <button onClick={restartSession} className="w-full py-3 bg-zinc-900 text-zinc-400 font-black text-xs uppercase italic rounded-xl hover:bg-zinc-700 hover:text-white transition-colors border border-transparent hover:border-white/10">Restart S</button>
-                  <button onClick={exitSession} className="w-full py-3 bg-transparent text-red-500/80 font-black text-xs uppercase italic tracking-widest hover:text-red-500 transition-colors">Eject & Exit</button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
+        </div >
 
         {feedback && (
           <div className="absolute top-[20%] left-0 right-0 flex justify-center pointer-events-none z-[150] animate-in zoom-in-50 fade-in duration-150">
@@ -1311,7 +1414,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
           onEnded={handleFinish}
           onLoadedMetadata={() => durationRef.current = audioRef.current?.duration || 1}
         />
-      </div>
+      </div >
     </>
   );
 };

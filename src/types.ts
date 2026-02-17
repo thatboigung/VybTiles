@@ -13,6 +13,8 @@ export interface AudioAnalysis {
   summary: string;
   highlights: number[];
   completion?: number; // Checkpoint: 0-100 percentage
+  coverArt?: string; // Base64 data URL
+  duration?: number; // Song length in seconds
 }
 
 export interface UserStats {

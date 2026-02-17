@@ -48,7 +48,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onEnter }) => {
   const slide = slides[currentSlide];
 
   return (
-    <div className="h-screen w-screen bg-[#0a0a0a] flex items-center justify-center overflow-hidden relative">
+    <div className="h-screen w-screen bg-[#121212] bg-gradient-to-b from-[#121212] to-black flex items-center justify-center overflow-hidden relative">
       <div className="relative z-10 w-full max-w-4xl px-8 flex flex-col items-center text-center">
         {/* ...existing code... */}
         <div key={slide.id} className="animate-in fade-in slide-in-from-bottom-12 duration-1000 flex flex-col items-center">
@@ -75,7 +75,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onEnter }) => {
           </button>
         </div>
       </div>
-      <div className="absolute bottom-12 left-12"><p className="text-[10px] font-black text-white/10 uppercase tracking-[0.5em]">System Version 3.0.0</p></div>
+      <div className="absolute bottom-12 left-12"><p className="text-[10px] font-black text-white/10 uppercase tracking-[0.5em]">Gavena Presents</p></div>
     </div>
   );
 };
