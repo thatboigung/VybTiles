@@ -717,7 +717,7 @@ const App: React.FC = () => {
       {/* Mobile Bottom Navigation */}
       {
         screen !== 'game' && (
-          <BottomNav currentScreen={screen as any} setScreen={setScreen as any} />
+          <BottomNav currentScreen={screen as any} setScreen={setScreen as any} hasActivePlayer={!!activeTrackForPlayer} />
         )
       }
 

@@ -3,11 +3,12 @@ import React from 'react';
 interface BottomNavProps {
     currentScreen: 'collection' | 'game' | 'settings';
     setScreen: (screen: 'collection' | 'game' | 'settings') => void;
+    hasActivePlayer: boolean;
 }
 
-export const BottomNav: React.FC<BottomNavProps> = ({ currentScreen, setScreen }) => {
+export const BottomNav: React.FC<BottomNavProps> = ({ currentScreen, setScreen, hasActivePlayer }) => {
     return (
-        <div className="md:hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-[#1a1a1a]/90 backdrop-blur-xl border border-white/10 rounded-full px-6 py-3 flex items-center gap-8 shadow-2xl">
+        <div className={`md:hidden fixed z-[50] bg-[#1a1a1a]/90 backdrop-blur-xl border border-white/10 rounded-full px-6 py-3 flex items-center gap-8 shadow-2xl transition-all duration-300 left-1/2 -translate-x-1/2 ${hasActivePlayer ? 'bottom-[80px]' : 'bottom-6'}`}>
             <button
                 onClick={() => setScreen('collection')}
                 className={`flex flex-col items-center gap-1 transition-colors ${currentScreen === 'collection' ? 'text-white' : 'text-slate-500 hover:text-slate-300'}`}

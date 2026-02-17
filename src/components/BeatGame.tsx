@@ -1021,7 +1021,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
               {/* Right: Stats Pills Row */}
               {/* Right: Unified Stats & Progress Card */}
-              <div className="flex-1 min-w-0 bg-[#3333]/80 backdrop-blur-md  rounded-2xl overflow-hidden flex flex-col shadow-xl">
+              <div className="flex-1 min-w-0 bg-[#222]/20 backdrop-blur-md  rounded-2xl overflow-hidden flex flex-col shadow-xl">
 
                 {/* Top: Song Info & Stats */}
                 <div className="flex items-center justify-between px-3 py-2 gap-3">
