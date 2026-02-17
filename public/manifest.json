@@ -1,0 +1,16 @@
+{
+    "name": "Vyb Taps - Rhythm & Beats",
+    "short_name": "Vyb Taps",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#121212",
+    "theme_color": "#121212",
+    "orientation": "portrait",
+    "icons": [
+        {
+            "src": "/vite.svg",
+            "type": "image/svg+xml",
+            "sizes": "512x512"
+        }
+    ]
+}
