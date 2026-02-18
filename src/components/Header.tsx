@@ -23,8 +23,9 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="container mx-auto px-4 h-20 flex items-center justify-between ">
         <div className="flex items-center gap-6">
           <div className="flex flex-col">
-            <h1 className="text-xs font-black text-slate-500 uppercase tracking-widest leading-none mb-1">
-              {user.username || 'AGENT'} <span className="text-white italic ml-2">LVL {user.level}</span>
+            <h1 className="text-xs font-black text-slate-500 uppercase tracking-widest leading-none mb-1 flex items-center max-w-[128px]">
+              <span className="truncate">{user.username || 'AGENT'}</span>
+              <span className="text-white italic ml-2 shrink-0">LVL {user.level}</span>
             </h1>
             <div className="w-32 h-2 bg-white/5 rounded-full overflow-hidden shadow-inner ring-1 ring-white/10">
               <div className="h-full bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 transition-all duration-1000" style={{ width: `${(user.exp % 10000) / 100}%` }}></div>
