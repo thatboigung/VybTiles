@@ -474,7 +474,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="h-screen w-screen bg-[#121212] bg-gradient-to-b from-[#121212] to-black text-slate-100 flex flex-col overflow-hidden">
+    <div className="h-screen w-screen bg-[#121212] bg-gradient-to-b from-[#333] to-black text-slate-100 flex flex-col overflow-hidden">
       {screen !== 'game' && (
         <Header
           user={user}
@@ -531,10 +531,10 @@ const App: React.FC = () => {
         )}
 
         {screen === 'collection' && (
-          <div className="h-full container mx-auto px-4 py-8 overflow-y-auto no-scrollbar relative">
-            <div className="max-w-5xl mx-auto space-y-8 relative z-10">
+          <div className="h-full container mx-auto p-2 overflow-y-auto no-scrollbar relative">
+            <div className="max-w-5xl mx-auto space-y-0 relative z-10">
               {/* Hero Section */}
-              <section className="flex flex-col md:flex-row gap-8 items-end p-6 bg-gradient-to-b from-transparent to-black/20 rounded-3xl">
+              <section className="flex flex-col md:flex-row gap-0 items-end p-0 bg-gradient-to-b from-transparent to-black/20 rounded-none">
                 {/* Hero Art */}
                 <div className="w-full md:w-56 md:h-56 aspect-square shrink-0 shadow-[0_20px_50px_rgba(0,0,0,0.5)] rounded-lg overflow-hidden relative group">
                   {history.length > 0 && history[0].coverArt ? (
@@ -547,8 +547,7 @@ const App: React.FC = () => {
                 </div>
 
                 {/* Hero Info */}
-                <div className="flex flex-col gap-4 w-full overflow-hidden">
-                  <span className="text-xs font-bold uppercase tracking-widest text-white/60">Last Played</span>
+                <div className="flex flex-col gap-4 w-full overflow-hidden mt-2">
                   <h1 className="text-4xl md:text-6xl font-black italic tracking-tighter text-white drop-shadow-xl truncate leading-none">
                     {history.length > 0 ? history[0].fileName.replace(/\.[^/.]+$/, "") : "No History"}
                   </h1>
@@ -627,24 +626,26 @@ const App: React.FC = () => {
                       <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24"><path d="M6 10c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm12 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm-6 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" /></svg>
                     </button>
                   </div>
+
+                  {/* Currency Bar */}
+                  <div className=" flex justify-center px-0 pb-2 pt-2">
+                    <CurrencyBar
+                      user={user}
+                      hearts={hearts}
+                      shields={shields}
+                      onExchange={handleExchangeCurrency}
+                      onShowShop={() => setShowResourceMenu(true)}
+                      compact={false}
+                    />
+                  </div>
                 </div>
               </section>
 
-              {/* Currency Bar */}
-              <div className="px-4 pb-2">
-                <CurrencyBar
-                  user={user}
-                  hearts={hearts}
-                  shields={shields}
-                  onExchange={handleExchangeCurrency}
-                  onShowShop={() => setShowResourceMenu(true)}
-                  compact={false}
-                />
-              </div>
+
 
               {/* History List Header */}
-              <div className="flex items-center justify-between px-4 pt-2 sticky top-0 z-10 py-2">
-                <h2 className="text-lg font-black italic text-white uppercase tracking-tighter">Your Tracks</h2>
+              <div className="flex items-center justify-between px-0 pt-5 sticky top-0 z-10 py-0 ">
+                <h2 className=" font-black italic text-gray-500"></h2>
                 <div className="relative group">
                   <input
                     type="text"
@@ -658,7 +659,7 @@ const App: React.FC = () => {
               </div>
 
               {/* History List at bottom */}
-              <div className="px-2 pb-16">
+              <div className="px-0 pb-16">
                 <HistoryList
                   history={searchQuery ? history.filter(track =>
                     track.fileName.toLowerCase().includes(searchQuery.toLowerCase())
@@ -701,25 +702,8 @@ const App: React.FC = () => {
         }
       </main >
 
-      {/* Persistent Bottom Player */}
-      {screen !== 'game' && activeTrackForPlayer && (
-        <BottomPlayer
-          currentSong={activeTrackForPlayer}
-          isPlaying={audioState.isPlaying}
-          onPlayPause={handleGlobalPlayPause}
-          progress={audioState.progress}
-          currentTime={audioState.currentTime}
-          duration={audioState.duration || (activeAudioTrack ? 0 : 180)}
-          onSeek={handleGlobalSeek}
-        />
-      )}
 
-      {/* Mobile Bottom Navigation */}
-      {
-        screen !== 'game' && (
-          <BottomNav currentScreen={screen as any} setScreen={setScreen as any} hasActivePlayer={!!activeTrackForPlayer} />
-        )
-      }
+
 
       <ExchangeSuccessModal
         isOpen={showExchangeSuccess}

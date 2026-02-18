@@ -6,6 +6,30 @@ import { RechargeModal } from './RechargeModal';
 const LANES = 4;
 const TARGET_Y_RATIO = 0.8;
 
+const GAME_COLORS = [
+  '#16a34a', // Green
+  '#2563eb', // Blue
+  '#dc2626', // Red
+  '#9333ea', // Purple
+  '#64748b', // Gray
+  '#334155', // Charcoal Gray
+  '#ca8a04', // Yellow
+  '#db2777'  // Pink
+];
+
+function lerpColor(c1: string, c2: string, t: number) {
+  const r1 = parseInt(c1.slice(1, 3), 16);
+  const g1 = parseInt(c1.slice(3, 5), 16);
+  const b1 = parseInt(c1.slice(5, 7), 16);
+  const r2 = parseInt(c2.slice(1, 3), 16);
+  const g2 = parseInt(c2.slice(3, 5), 16);
+  const b2 = parseInt(c2.slice(5, 7), 16);
+  const r = Math.round(r1 + (r2 - r1) * t);
+  const g = Math.round(g1 + (g2 - g1) * t);
+  const b = Math.round(b1 + (b2 - b1) * t);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
 const TutorialModal: React.FC<{ mode: string; isOpen: boolean; onClose: () => void }> = ({ mode, isOpen, onClose }) => {
   if (!isOpen) return null;
   return (
@@ -707,10 +731,19 @@ export const BeatGame: React.FC<BeatGameProps> = ({
       ctx.translate((Math.random() - 0.5) * currentShake, (Math.random() - 0.5) * currentShake);
 
       ctx.clearRect(0, 0, w, h);
-      // Background Gradient
+      // Background Dynamic Gradient
+      const cycleDuration = 5; // Change color every 5 seconds
+      const colorProgress = (displayTime / cycleDuration) % GAME_COLORS.length;
+      const index = Math.floor(colorProgress);
+      const nextIndex = (index + 1) % GAME_COLORS.length;
+      const prevIndex = (index - 1 + GAME_COLORS.length) % GAME_COLORS.length;
+      const tLerp = colorProgress % 1;
+
+      const dynamicBgColorTop = lerpColor(GAME_COLORS[index], GAME_COLORS[nextIndex], tLerp);
+
       const bgGradient = ctx.createLinearGradient(0, 0, 0, h);
-      bgGradient.addColorStop(0, '#1e293b'); // slate-800
-      bgGradient.addColorStop(1, '#000000'); // black
+      bgGradient.addColorStop(0, dynamicBgColorTop);
+      bgGradient.addColorStop(1, lerpColor(GAME_COLORS[prevIndex], GAME_COLORS[index], tLerp));
       ctx.fillStyle = bgGradient;
       ctx.fillRect(0, 0, w, h);
 

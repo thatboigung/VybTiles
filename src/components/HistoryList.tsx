@@ -42,10 +42,10 @@ export const HistoryList: React.FC<HistoryListProps> = ({
 
   return (
     <>
-      <div className="space-y-2 pr-1" ref={menuRef}>
+      <div className="pr-1" ref={menuRef}>
         {history.map((item) => (
-          <div key={item.id} className="w-full flex items-center gap-3 group backdrop-blur-sm mb-2">
-            <div className="flex-1 flex items-center gap-4 p-4 cursor-pointer relative overflow-hidden rounded-xl" onClick={() => onSelect(item)}>
+          <div key={item.id} className="w-full flex items-center gap-[10px] group backdrop-blur-sm mb-[2px]">
+            <div className="flex-1 min-w-0 flex items-center gap-[10px] p-[10px] cursor-pointer relative overflow-hidden rounded-xl" onClick={() => onSelect(item)}>
               {/* Hover effect background */}
               <div className="absolute inset-0"></div>
 
@@ -63,18 +63,9 @@ export const HistoryList: React.FC<HistoryListProps> = ({
                 <p className="text-lg font-medium text-white truncate w-full" title={item.fileName}>
                   {item.fileName}
                 </p>
-                <div className="flex items-center gap-4 mt-2 flex-wrap">
-                  <div className="flex items-center gap-2 bg-black/20 px-2 py-0.5 rounded-md shrink-0">
-                    <div className="flex gap-0.5" title={`Completion: ${item.completion || 0}%`}>
-                      {[...Array(10)].map((_, i) => {
-                        const earned = item.completion ? Math.floor(item.completion / 10) : 0;
-                        return (
-                          <svg key={i} className={`w-2 h-2 ${i < earned ? 'text-yellow-400 fill-current drop-shadow-[0_0_2px_rgba(250,204,21,0.8)]' : 'text-zinc-800'}`} viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" />
-                          </svg>
-                        );
-                      })}
-                    </div>
+                <div className="flex items-center gap-[10px] mt-[10px] flex-wrap">
+                  <div className="flex items-center gap-2 bg-black/20 px-2 py-0.5 rounded-md shrink-0 text-[10px] font-bold text-yellow-500/80 uppercase tracking-tight">
+                    {item.completion || 0}%
                   </div>
                 </div>
               </div>
@@ -86,51 +77,85 @@ export const HistoryList: React.FC<HistoryListProps> = ({
                 </span>
               )}
 
-              <button
-                onClick={(e) => { e.stopPropagation(); onSelect(item); }}
-                className="w-12 h-12 bg-white text-black rounded-2xl flex items-center justify-center transition-all hover:scale-105 shadow-[0_4px_0_rgb(163,163,163)] active:shadow-none active:translate-y-[4px] relative z-10 opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0 duration-300"
-                title="Launch Game"
-              >
-                <svg className="w-6 h-6 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-              </button>
             </div>
 
-            <div className="relative">
+            <div className="relative shrink-0">
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  setOpenMenuId(openMenuId === item.id ? null : item.id);
+                  setOpenMenuId(item.id);
                 }}
                 className="w-10 h-10 rounded-full flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10 transition-colors"
+                title="Track Options"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
                 </svg>
               </button>
-
-              {openMenuId === item.id && (
-                <div className="absolute right-0 top-full mt-2 w-48 bg-[#1a1a1a] border border-white/10 rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top-right">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setTrackToDelete(item);
-                      setOpenMenuId(null);
-                    }}
-                    className="w-full px-4 py-3 text-left text-sm font-bold text-red-500 hover:bg-red-500/10 flex items-center gap-3 transition-colors"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                    Delete Track
-                  </button>
-                </div>
-              )}
             </div>
           </div>
         ))}
-      </div >
+      </div>
+
+      {/* Global Menu Popup */}
+      {openMenuId && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/40 backdrop-blur-sm animate-in fade-in duration-300 ease-out"
+          onClick={() => setOpenMenuId(null)}
+        >
+          <div
+            className="w-full max-w-sm bg-[#121212] border border-white/10 rounded-[2.5rem] overflow-hidden shadow-[0_22px_70px_4px_rgba(0,0,0,0.56)] animate-in zoom-in-90 slide-in-from-bottom-10 duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="p-8">
+              <div className="flex flex-col items-center text-center mb-8">
+                <div className="w-16 h-16 bg-white shrink-0 rounded-2xl flex items-center justify-center mb-4 shadow-xl">
+                  <svg className="w-8 h-8 text-black" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" /></svg>
+                </div>
+                <h3 className="text-xl font-black text-white truncate w-full px-2">
+                  {history.find(t => t.id === openMenuId)?.fileName.replace(/\.[^/.]+$/, "")}
+                </h3>
+                <p className="text-[10px] text-slate-500 uppercase tracking-[0.2em] font-bold mt-1">Track Intelligence Active</p>
+              </div>
+
+              <div className="space-y-3">
+                <button
+                  onClick={() => {
+                    const item = history.find(t => t.id === openMenuId);
+                    if (item) onSelect(item);
+                    setOpenMenuId(null);
+                  }}
+                  className="w-full py-5 px-6 bg-white text-black font-black uppercase text-xs rounded-2xl flex items-center justify-center gap-3 hover:scale-[1.02] active:scale-95 transition-all shadow-lg active:shadow-none"
+                >
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                  Sync & Play
+                </button>
+
+                <button
+                  onClick={() => {
+                    const item = history.find(t => t.id === openMenuId);
+                    if (item) setTrackToDelete(item);
+                    setOpenMenuId(null);
+                  }}
+                  className="w-full py-5 px-6 bg-zinc-900 text-red-500 font-black uppercase text-xs rounded-2xl flex items-center justify-center gap-3 hover:bg-zinc-800 active:scale-95 transition-all border border-white/5"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  Remove Record
+                </button>
+
+                <button
+                  onClick={() => setOpenMenuId(null)}
+                  className="w-full py-3 text-slate-500 font-bold uppercase text-[10px] tracking-widest rounded-2xl hover:text-white transition-colors"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <DeleteConfirmationModal
         isOpen={!!trackToDelete}
