@@ -7,8 +7,6 @@ import { HistoryList } from './components/HistoryList';
 import { Settings } from './components/Settings';
 import { LandingPage } from './components/LandingPage';
 import { CurrencyBar } from './components/CurrencyBar';
-import { BottomNav } from './components/BottomNav';
-import { BottomPlayer } from './components/BottomPlayer';
 import { ExchangeSuccessModal } from './components/ExchangeSuccessModal';
 import { ResourceShopModal } from './components/ResourceShopModal';
 import { InsufficientFundsModal } from './components/InsufficientFundsModal';
@@ -78,14 +76,6 @@ const App: React.FC = () => {
   const [analysisStep, setAnalysisStep] = useState<string>('Initializing');
   const [screen, setScreen] = useState<'landing' | 'collection' | 'game' | 'settings' | 'help'>('landing');
 
-  // Global Audio Player State
-  const [activeAudioTrack, setActiveAudioTrack] = useState<AudioAnalysis | null>(null);
-  const [audioState, setAudioState] = useState({
-    isPlaying: false,
-    progress: 0,
-    currentTime: 0,
-    duration: 0
-  });
   const globalAudioRef = useRef<HTMLAudioElement>(null);
 
   const [user, setUser] = useState<UserStats>(() => {
@@ -468,18 +458,6 @@ const App: React.FC = () => {
   // Global Audio Logic
 
 
-  // Sync active track source
-  useEffect(() => {
-    if (activeAudioTrack && globalAudioRef.current) {
-      // Only change src if it's different to avoid reload
-      const currentSrc = globalAudioRef.current.src;
-      // Check if src needs update (handling blob vs object URL format)
-      if (!currentSrc.includes(activeAudioTrack.id) && activeAudioTrack.fileUrl && activeAudioTrack.fileUrl !== currentSrc) {
-        globalAudioRef.current.src = activeAudioTrack.fileUrl;
-        globalAudioRef.current.play().catch(e => console.error("Auto-play failed", e));
-      }
-    }
-  }, [activeAudioTrack]);
 
   // Pause global audio when entering game
   useEffect(() => {
@@ -489,27 +467,8 @@ const App: React.FC = () => {
   }, [screen]);
 
 
-  const handleGlobalPlayPause = () => {
-    if (!globalAudioRef.current) return;
-    if (globalAudioRef.current.paused) {
-      if (!activeAudioTrack && history.length > 0) {
-        // Init with first track if nothing active
-        setActiveAudioTrack(history[0]);
-      } else {
-        globalAudioRef.current.play();
-      }
-    } else {
-      globalAudioRef.current.pause();
-    }
-  };
 
-  const handleGlobalSeek = (time: number) => {
-    if (globalAudioRef.current) {
-      globalAudioRef.current.currentTime = time;
-    }
-  };
 
-  const activeTrackForPlayer = activeAudioTrack || (history.length > 0 ? history[0] : null);
 
   if (screen === 'landing') {
     return <>
@@ -531,25 +490,6 @@ const App: React.FC = () => {
       {/* Global Audio Element */}
       <audio
         ref={globalAudioRef}
-        onPlay={() => setAudioState(prev => ({ ...prev, isPlaying: true }))}
-        onPause={() => setAudioState(prev => ({ ...prev, isPlaying: false }))}
-        onTimeUpdate={(e) => {
-          const audio = e.currentTarget;
-          setAudioState(prev => ({
-            ...prev,
-            currentTime: audio.currentTime,
-            progress: audio.duration ? audio.currentTime / audio.duration : 0,
-            duration: audio.duration || 0,
-          }));
-        }}
-        onLoadedMetadata={(e) => {
-          const audio = e.currentTarget;
-          setAudioState(prev => ({
-            ...prev,
-            duration: audio.duration || 0,
-          }));
-        }}
-        onEnded={() => setAudioState(prev => ({ ...prev, isPlaying: false, progress: 0, currentTime: 0 }))}
       />
 
       <main className="flex-1 overflow-hidden relative">
