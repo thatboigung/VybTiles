@@ -16,6 +16,7 @@ export interface AudioAnalysis {
   coverArt?: string; // Base64 data URL
   duration?: number; // Song length in seconds
   lastPlayed?: number; // Timestamp of last playback
+  source?: 'local' | 'online'; // Source of the track
 }
 
 export interface UserStats {
@@ -33,3 +34,16 @@ export interface UserStats {
 
 export type GameMode = 'classic' | 'endless';
 export type Level = 'easy' | 'medium' | 'hard';
+
+export interface YouTubeResult {
+  videoId: string;
+  title: string;
+  author: string;
+  duration: number; // in seconds
+  videoThumbnails: Array<{
+    quality: string;
+    url: string;
+    width: number;
+    height: number;
+  }>;
+}

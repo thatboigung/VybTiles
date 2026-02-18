@@ -10,7 +10,7 @@ import { CurrencyBar } from './components/CurrencyBar';
 import { ExchangeSuccessModal } from './components/ExchangeSuccessModal';
 import { ResourceShopModal } from './components/ResourceShopModal';
 import { InsufficientFundsModal } from './components/InsufficientFundsModal';
-import type { AudioAnalysis, UserStats, GameMode } from './types';
+import type { AudioAnalysis, UserStats, GameMode, YouTubeResult } from './types';
 import { analyzeLocally } from './services/geminiService';
 import { storageService } from './services/storageService';
 import { parseBlob } from 'music-metadata-browser';
@@ -31,6 +31,14 @@ const STORAGE_KEYS = {
 };
 
 const MAX_HEARTS = 10;
+
+const INVIDIOUS_INSTANCES = [
+  'iv.ggtyler.dev',
+  'yewtu.be',
+  'inv.nadeko.net',
+  'invidious.nerdvpn.de',
+  'invidious.privacyredirect.com'
+];
 
 const LogoutConfirmModal: React.FC<{ isOpen: boolean; onClose: () => void; onConfirm: () => void }> = ({ isOpen, onClose, onConfirm }) => {
   if (!isOpen) return null;
@@ -75,7 +83,12 @@ const App: React.FC = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisStep, setAnalysisStep] = useState<string>('Initializing');
   const [gameMode, setGameMode] = useState<GameMode>('classic');
-  const [screen, setScreen] = useState<'landing' | 'collection' | 'game' | 'settings' | 'help'>('landing');
+  const [screen, setScreen] = useState<'landing' | 'collection' | 'game' | 'settings' | 'help' | 'search'>('landing');
+  const [activeTab, setActiveTab] = useState<'local' | 'online'>('local');
+
+  const [onlineResults, setOnlineResults] = useState<YouTubeResult[]>([]);
+  const [isSearchingOnline, setIsSearchingOnline] = useState(false);
+  const [onlineSearchInput, setOnlineSearchInput] = useState('');
 
   const globalAudioRef = useRef<HTMLAudioElement>(null);
 
@@ -211,6 +224,193 @@ const App: React.FC = () => {
     setScreen('landing');
   };
 
+  // YouTube Search Logic (Invidious API)
+  useEffect(() => {
+    if (!onlineSearchInput.trim()) {
+      setOnlineResults([]);
+      setIsSearchingOnline(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsSearchingOnline(true);
+
+      let success = false;
+      for (const instance of INVIDIOUS_INSTANCES) {
+        if (success) break;
+        try {
+          const response = await fetch(`https://${instance}/api/v1/search?q=${encodeURIComponent(onlineSearchInput)}&type=video`);
+          if (!response.ok) continue;
+
+          const data = await response.json();
+          if (Array.isArray(data)) {
+            setOnlineResults(data.filter(item => item.type === 'video').map(item => ({
+              videoId: item.videoId,
+              title: item.title,
+              author: item.author,
+              duration: item.lengthSeconds,
+              videoThumbnails: item.videoThumbnails
+            })));
+            success = true;
+          }
+        } catch (error) {
+          console.warn(`Search failed on ${instance}:`, error);
+        }
+      }
+
+      if (!success) {
+        console.error("All search instances failed.");
+        setOnlineResults([]);
+      }
+      setIsSearchingOnline(false);
+    }, 600); // 600ms debounce
+
+    return () => clearTimeout(timer);
+  }, [onlineSearchInput]);
+
+  const analyzeAudioBuffer = async (audioBuffer: AudioBuffer) => {
+    setAnalysisStep('Beat Mapping');
+    const rawData = audioBuffer.getChannelData(0);
+    const samples = 1000;
+    const blockSize = Math.floor(rawData.length / samples);
+    const waveform = [];
+
+    for (let i = 0; i < samples; i++) {
+      let max = 0;
+      for (let j = 0; j < blockSize; j += 8) {
+        const val = Math.abs(rawData[i * blockSize + j]);
+        if (val > max) max = val;
+      }
+      waveform.push(max);
+    }
+
+    const beats: number[] = [];
+    const windowSize = 1024;
+    const step = 512;
+    const energies = [];
+
+    for (let i = 0; i < rawData.length - windowSize; i += step) {
+      let energy = 0;
+      for (let j = 0; j < windowSize; j++) {
+        energy += rawData[i + j] * rawData[i + j];
+      }
+      energies.push(energy / windowSize);
+    }
+
+    const localWindow = 43;
+    for (let i = localWindow; i < energies.length - localWindow; i++) {
+      const e = energies[i];
+      let isPeak = true;
+      for (let j = i - localWindow; j <= i + localWindow; j++) {
+        if (energies[j] > e) {
+          isPeak = false;
+          break;
+        }
+      }
+      if (isPeak && e > 0.01) {
+        const time = (i * step) / audioBuffer.sampleRate;
+        if (beats.length === 0 || (time - beats[beats.length - 1] > 0.3)) {
+          beats.push(time);
+        }
+      }
+    }
+
+    return { waveform, beats };
+  };
+
+  const handleOnlineTrackSelect = async (result: YouTubeResult) => {
+    if ((user.stars || 0) < 10) {
+      setInsufficientFunds({ isOpen: true, currency: 'stars', required: 10 });
+      return;
+    }
+
+    setUser(prev => ({ ...prev, stars: (prev.stars || 0) - 10 }));
+    setIsAnalyzing(true);
+    setAnalysisStep('Syncing Cloud');
+
+    let arrayBuffer: ArrayBuffer | null = null;
+    let success = false;
+    let audioUrl = '';
+
+    for (const instance of INVIDIOUS_INSTANCES) {
+      if (success) break;
+      try {
+        audioUrl = `https://${instance}/latest_version?id=${result.videoId}&itag=140`;
+        const response = await fetch(audioUrl);
+        if (!response.ok) continue;
+
+        arrayBuffer = await response.arrayBuffer();
+        if (arrayBuffer.byteLength > 1000) { // Basic check for valid data
+          success = true;
+        }
+      } catch (error) {
+        console.warn(`Sync failed on ${instance}:`, error);
+      }
+    }
+
+    if (!success || !arrayBuffer) {
+      alert("All cloud signals lost. This track might be restricted or all servers are busy. Please try another one.");
+      setUser(prev => ({ ...prev, stars: (prev.stars || 0) + 10 }));
+      setIsAnalyzing(false);
+      return;
+    }
+
+    try {
+      if (!audioContextRef.current) audioContextRef.current = new AudioContext();
+      const ctx = audioContextRef.current;
+
+      setAnalysisStep('Decoding');
+      const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+
+      const { waveform, beats } = await analyzeAudioBuffer(audioBuffer);
+
+      setAnalysisStep('Finalizing');
+      const localResult = analyzeLocally(beats, result.title);
+
+      const blob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
+
+      const newAnalysis: AudioAnalysis = {
+        id: crypto.randomUUID(),
+        fileName: result.title,
+        fileSize: arrayBuffer.byteLength,
+        timestamp: Date.now(),
+        waveform,
+        beats,
+        fileUrl: URL.createObjectURL(blob),
+        bpm: localResult.bpm || 120,
+        key: localResult.key || "C",
+        genre: localResult.genre || "Electronic",
+        mood: localResult.mood || "Neutral",
+        summary: localResult.summary || "Cloud sync ready.",
+        highlights: localResult.highlights || [],
+        coverArt: result.videoThumbnails.find((t: any) => t.quality === 'medium')?.url || result.videoThumbnails[0]?.url,
+        duration: audioBuffer.duration,
+        source: 'online'
+      };
+
+      await storageService.saveTrack(newAnalysis, blob);
+      setCurrentPlaylist([newAnalysis]);
+      setHistory(prev => {
+        const updated = [newAnalysis, ...prev];
+        return updated.sort((a, b) => {
+          if (a.lastPlayed || b.lastPlayed) {
+            const timeA = a.lastPlayed || 0;
+            const timeB = b.lastPlayed || 0;
+            if (timeA !== timeB) return timeB - timeA;
+          }
+          return (b.timestamp || 0) - (a.timestamp || 0);
+        });
+      });
+      setScreen('game');
+    } catch (error) {
+      console.error(error);
+      alert("Cloud signal lost. Please try another track.");
+      setUser(prev => ({ ...prev, stars: (prev.stars || 0) + 10 }));
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
   const handleFileUpload = async (file: File) => {
     if ((user.stars || 0) < 10) {
       setInsufficientFunds({ isOpen: true, currency: 'stars', required: 10 });
@@ -229,51 +429,7 @@ const App: React.FC = () => {
       setAnalysisStep('Decoding');
       const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
 
-      setAnalysisStep('Beat Mapping');
-      const rawData = audioBuffer.getChannelData(0);
-
-      const samples = 1000;
-      const blockSize = Math.floor(rawData.length / samples);
-      const waveform = [];
-      for (let i = 0; i < samples; i++) {
-        let max = 0;
-        for (let j = 0; j < blockSize; j += 8) {
-          const val = Math.abs(rawData[i * blockSize + j]);
-          if (val > max) max = val;
-        }
-        waveform.push(max);
-      }
-
-      const beats: number[] = [];
-      const windowSize = 1024;
-      const step = 512;
-      const energies = [];
-
-      for (let i = 0; i < rawData.length - windowSize; i += step) {
-        let energy = 0;
-        for (let j = 0; j < windowSize; j++) {
-          energy += rawData[i + j] * rawData[i + j];
-        }
-        energies.push(energy / windowSize);
-      }
-
-      const localWindow = 43;
-      for (let i = localWindow; i < energies.length - localWindow; i++) {
-        const e = energies[i];
-        let isPeak = true;
-        for (let j = i - localWindow; j <= i + localWindow; j++) {
-          if (energies[j] > e) {
-            isPeak = false;
-            break;
-          }
-        }
-        if (isPeak && e > 0.01) {
-          const time = (i * step) / audioBuffer.sampleRate;
-          if (beats.length === 0 || (time - beats[beats.length - 1] > 0.3)) {
-            beats.push(time);
-          }
-        }
-      }
+      const { waveform, beats } = await analyzeAudioBuffer(audioBuffer);
 
       setAnalysisStep('Finalizing');
       const localResult = analyzeLocally(beats, file.name);
@@ -309,7 +465,8 @@ const App: React.FC = () => {
         summary: localResult.summary || "Local sync ready.",
         highlights: localResult.highlights || [],
         coverArt,
-        duration: audioBuffer.duration
+        duration: audioBuffer.duration,
+        source: 'local'
       };
 
       // Save to IndexedDB
@@ -617,9 +774,15 @@ const App: React.FC = () => {
                     {/* Add Song Button (+ input) */}
                     <div className="relative">
                       <button
-                        onClick={() => document.getElementById('hidden-file-input')?.click()}
+                        onClick={() => {
+                          if (activeTab === 'online') {
+                            setScreen('search');
+                          } else {
+                            document.getElementById('hidden-file-input')?.click();
+                          }
+                        }}
                         className="w-8 h-8 rounded-full border-2 border-slate-500 text-slate-500 flex items-center justify-center hover:border-white hover:text-white transition-all"
-                        title="Add Songs"
+                        title={activeTab === 'online' ? "Search Online" : "Add Songs"}
                       >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
                       </button>
@@ -645,17 +808,36 @@ const App: React.FC = () => {
                       <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24"><path d="M6 10c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm12 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm-6 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" /></svg>
                     </button>
                   </div>
-                  <div className="flex items-center justify-between px-0 pt-5 sticky top-0 z-10 py-0 ">
-                    <h2 className=" font-black italic text-gray-500"></h2>
+
+                  {/* Hierarchy Tabs */}
+                  <div className="flex items-center gap-6 mt-6 px-1  pb-2">
+                    <button
+                      onClick={() => setActiveTab('local')}
+                      className={`text-xs font-black uppercase tracking-widest transition-all relative pb-2 ${activeTab === 'local' ? 'text-white' : 'text-slate-500 hover:text-white/60'}`}
+                    >
+                      Local
+                      {activeTab === 'local' && (
+                        <div className="absolute bottom-0 left-0 right-0 h-1 bg-green-500 rounded-full" />
+                      )}
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('online')}
+                      className={`text-xs font-black uppercase tracking-widest transition-all relative pb-2 ${activeTab === 'online' ? 'text-white' : 'text-slate-500 hover:text-white/60'}`}
+                    >
+                      Online
+                      {activeTab === 'online' && (
+                        <div className="absolute bottom-0 left-0 right-0 h-1 bg-green-500 rounded-full" />
+                      )}
+                    </button>
+
                     <div className="relative group">
                       <input
                         type="text"
-                        placeholder="Search..."
+                        placeholder="Search"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="bg-transparent text-right text-xs font-bold text-white placeholder:text-slate-600 focus:outline-none w-24 focus:w-40 transition-all"
+                        className="bg-transparent text-right text-xs font-bold text-white placeholder:text-slate-600 focus:outline-none w-24 focus:w-40 transition-all rounded-2xl bg-white/10 p-2"
                       />
-                      <div className="absolute right-0 bottom-0 h-px w-full bg-white/10 group-focus-within:bg-white/50 transition-colors"></div>
                     </div>
                   </div>
 
@@ -670,9 +852,11 @@ const App: React.FC = () => {
               {/* History List at bottom */}
               <div className="px-0 pb-16">
                 <HistoryList
-                  history={searchQuery ? history.filter(track =>
-                    track.fileName.toLowerCase().includes(searchQuery.toLowerCase())
-                  ) : history}
+                  history={history.filter(track => {
+                    const matchesSearch = track.fileName.toLowerCase().includes(searchQuery.toLowerCase());
+                    const trackSource = track.source || 'local'; // Default to 'local' for legacy tracks
+                    return matchesSearch && trackSource === activeTab;
+                  })}
                   onSelect={handlePlayFromHistory}
                   onDelete={handleDeleteTrack}
                 />
@@ -681,6 +865,97 @@ const App: React.FC = () => {
           </div >
         )}
 
+        {screen === 'search' && (
+          <div className="h-full container mx-auto p-6 overflow-y-auto no-scrollbar relative animate-in fade-in slide-in-from-bottom-4 duration-300">
+            <div className="max-w-xl mx-auto space-y-8">
+              {/* Header */}
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={() => setScreen('collection')}
+                  className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center hover:bg-white/10 transition-colors"
+                >
+                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  </svg>
+                </button>
+                <h2 className="text-3xl font-black italic text-white uppercase tracking-tighter">Search Online</h2>
+              </div>
+
+              {/* Search Bar */}
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-6 flex items-center pointer-events-none">
+                  <svg className={`w-5 h-5 ${isSearchingOnline ? 'text-green-500 animate-pulse' : 'text-slate-500'} transition-colors`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                </div>
+                <input
+                  type="text"
+                  placeholder="Search YouTube..."
+                  value={onlineSearchInput}
+                  onChange={(e) => setOnlineSearchInput(e.target.value)}
+                  className="w-full bg-[#1e1b4b]/40 backdrop-blur-md border border-white/5 py-6 pl-16 pr-8 text-xl font-black text-white italic rounded-3xl outline-none focus:border-green-500/50 transition-all shadow-2xl"
+                  autoFocus
+                />
+              </div>
+
+              {/* Results List */}
+              <div className="space-y-2 pb-12">
+                {isSearchingOnline && onlineResults.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-20 animate-pulse">
+                    <div className="w-12 h-12 border-4 border-green-500/20 border-t-green-500 rounded-full animate-spin"></div>
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-4">Connecting to GAV3NA Cloud...</p>
+                  </div>
+                )}
+
+                {!isSearchingOnline && onlineSearchInput && onlineResults.length === 0 && (
+                  <div className="text-center py-20">
+                    <p className="text-xs font-bold text-slate-500 uppercase">No signals found for "{onlineSearchInput}"</p>
+                  </div>
+                )}
+
+                {onlineResults.map((result) => (
+                  <button
+                    key={result.videoId}
+                    className="w-full flex items-center gap-4 p-4 bg-white/5 hover:bg-white/10 border border-white/5 rounded-2xl transition-all group text-left"
+                    onClick={() => {
+                      handleOnlineTrackSelect(result);
+                    }}
+                  >
+                    <div className="w-20 h-20 rounded-xl overflow-hidden shrink-0 border border-white/10 relative">
+                      <img
+                        src={result.videoThumbnails.find((t: any) => t.quality === 'medium')?.url || result.videoThumbnails[0]?.url}
+                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+                        alt=""
+                      />
+                      <div className="absolute inset-0 bg-black/20 group-hover:bg-transparent transition-colors"></div>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-bold text-white truncate leading-tight mb-1">{result.title}</h4>
+                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider">{result.author}</p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <span className="text-[10px] font-bold text-slate-500 tabular-nums">
+                        {Math.floor(result.duration / 60)}:{Math.floor(result.duration % 60).toString().padStart(2, '0')}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+
+                {!onlineSearchInput && (
+                  <div className="flex flex-col items-center justify-center py-20 text-center opacity-40">
+                    <div className="w-20 h-20 bg-green-500/10 rounded-3xl flex items-center justify-center mb-6 border border-green-500/20">
+                      <svg className="w-10 h-10 text-green-500" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14.5v-9l6 4.5-6 4.5z" />
+                      </svg>
+                    </div>
+                    <h3 className="text-xl font-black italic text-white uppercase mb-2">GAV3NA Cloud Browser</h3>
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-[0.2em]">Enter parameters to sync online audio</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
         {
           screen === 'settings' && (
             <Settings
