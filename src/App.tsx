@@ -10,7 +10,7 @@ import { CurrencyBar } from './components/CurrencyBar';
 import { ExchangeSuccessModal } from './components/ExchangeSuccessModal';
 import { ResourceShopModal } from './components/ResourceShopModal';
 import { InsufficientFundsModal } from './components/InsufficientFundsModal';
-import type { AudioAnalysis, UserStats } from './types';
+import type { AudioAnalysis, UserStats, GameMode } from './types';
 import { analyzeLocally } from './services/geminiService';
 import { storageService } from './services/storageService';
 import { parseBlob } from 'music-metadata-browser';
@@ -74,6 +74,7 @@ const App: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisStep, setAnalysisStep] = useState<string>('Initializing');
+  const [gameMode, setGameMode] = useState<GameMode>('classic');
   const [screen, setScreen] = useState<'landing' | 'collection' | 'game' | 'settings' | 'help'>('landing');
 
   const globalAudioRef = useRef<HTMLAudioElement>(null);
@@ -324,9 +325,10 @@ const App: React.FC = () => {
     }
   };
 
-  const handlePlayFromHistory = (item: AudioAnalysis) => {
+  const handlePlayFromHistory = (item: AudioAnalysis, mode: GameMode = 'classic') => {
     // With IndexedDB, fileUrl is regenerated and valid
     if (!item.fileUrl) return alert("Error loading track. Please re-upload.");
+    setGameMode(mode);
     setCurrentPlaylist([item]);
     setScreen('game');
   };
@@ -477,7 +479,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="h-screen w-screen bg-[#121212] bg-gradient-to-b from-[#333] to-black text-slate-100 flex flex-col overflow-hidden">
+    <div className="h-screen w-screen bg-[#121212] bg-gradient-to-b from-[#333] to-black text-slate-50 flex flex-col overflow-hidden">
       {screen !== 'game' && (
         <Header
           user={user}
@@ -520,36 +522,51 @@ const App: React.FC = () => {
               {/* Hero Section */}
               <section className="flex flex-col md:flex-row gap-0 items-end p-0 bg-gradient-to-b from-transparent to-black/20 rounded-none">
                 {/* Hero Art */}
-                <div className="w-full md:w-56 md:h-56 aspect-square shrink-0 shadow-[0_20px_50px_rgba(0,0,0,0.5)] rounded-lg overflow-hidden relative group">
-                  {history.length > 0 && history[0].coverArt ? (
-                    <img src={history[0].coverArt} alt="Hero Cover" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full bg-zinc-800 flex items-center justify-center">
-                      <span className="text-4xl">🎵</span>
-                    </div>
-                  )}
-                </div>
+                {history.length > 0 && (
+                  <div className="w-full md:w-56 md:h-56 aspect-square shrink-0 shadow-[0_20px_50px_rgba(0,0,0,0.5)] rounded-lg overflow-hidden relative group">
+                    {history[0].coverArt ? (
+                      <img src={history[0].coverArt} alt="Hero Cover" className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full bg-zinc-800 flex items-center justify-center">
+                        <span className="text-4xl">🎵</span>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Hero Info */}
                 <div className="flex flex-col gap-4 w-full overflow-hidden mt-2">
-                  <h1 className="text-4xl md:text-6xl font-black italic tracking-tighter text-white drop-shadow-xl truncate leading-none">
-                    {history.length > 0 ? history[0].fileName.replace(/\.[^/.]+$/, "") : "No History"}
-                  </h1>
+                  {history.length > 0 && (
+                    <h1 className="text-2xl md:text-4xl font-black italic tracking-tighter text-white drop-shadow-xl truncate leading-none">
+                      {history[0].fileName.replace(/\.[^/.]+$/, "")}
+                    </h1>
+                  )}
 
                   {/* Metadata Row */}
-                  <div className="flex flex-wrap items-center gap-2 text-sm font-bold text-white/80">
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-6 h-6 rounded-full bg-purple-500/20 flex items-center justify-center border border-purple-500/30">
+                  <div className="flex items-center gap-2 text-sm font-bold text-white/80 overflow-hidden whitespace-nowrap">
+                    <div className="flex items-center gap-1.5 min-w-0 shrink">
+                      <div className="w-6 h-6 rounded-full bg-purple-500/20 flex items-center justify-center border border-purple-500/30 shrink-0">
                         <span className="text-[10px]">👤</span>
                       </div>
-                      <span>{user.username || "Player"}</span>
+                      <span className="truncate">{user.username || "Player"}</span>
                     </div>
                     <span className="text-white/20">•</span>
                     <span>Lv. {user.level}</span>
                     <span className="text-white/20">•</span>
                     <span>{user.songsPlayed || 0} Songs Played</span>
                     <span className="text-white/20">•</span>
-                    <span className="text-yellow-400">{user.perfects || 0} Gold</span>
+                  </div>
+
+                  {/* Currency Bar */}
+                  <div className=" px-0 pb-2 pt-2">
+                    <CurrencyBar
+                      user={user}
+                      hearts={hearts}
+                      shields={shields}
+                      onExchange={handleExchangeCurrency}
+                      onShowShop={() => setShowResourceMenu(true)}
+                      compact={false}
+                    />
                   </div>
 
                   {/* Actions Row */}
@@ -568,9 +585,7 @@ const App: React.FC = () => {
                         if (history.length > 0) {
                           // Pick random song
                           const random = history[Math.floor(Math.random() * history.length)];
-                          handlePlayFromHistory(random); // Note: Game component handles mode if we want endless explicitly we might need to pass a prop or just let user switch. 
-                          // User asked for "Shuffle to start playing any random song (start playing game)"
-                          // Actually, simply picking a random song and starting is good enough.
+                          handlePlayFromHistory(random, 'endless');
                         }
                       }}
                       className="p-3 rounded-full text-slate-400 hover:text-white transition-colors"
@@ -611,17 +626,7 @@ const App: React.FC = () => {
                     </button>
                   </div>
 
-                  {/* Currency Bar */}
-                  <div className=" flex justify-center px-0 pb-2 pt-2">
-                    <CurrencyBar
-                      user={user}
-                      hearts={hearts}
-                      shields={shields}
-                      onExchange={handleExchangeCurrency}
-                      onShowShop={() => setShowResourceMenu(true)}
-                      compact={false}
-                    />
-                  </div>
+
                 </div>
               </section>
 
@@ -681,6 +686,7 @@ const App: React.FC = () => {
               onFinish={handleGameFinish}
               userLevel={user.level}
               currentExp={user.exp}
+              initialMode={gameMode}
             />
           )
         }

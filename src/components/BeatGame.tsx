@@ -6,16 +6,17 @@ import { RechargeModal } from './RechargeModal';
 const LANES = 4;
 const TARGET_Y_RATIO = 0.8;
 
-const GAME_COLORS = [
-  '#16a34a', // Green
-  '#2563eb', // Blue
-  '#dc2626', // Red
-  '#9333ea', // Purple
-  '#64748b', // Gray
-  '#334155', // Charcoal Gray
-  '#ca8a04', // Yellow
-  '#db2777'  // Pink
+const BG_PALETTE = [
+  '#f97316', // Orange
+  '#0ea5e9', // Skyblue
+  '#f87171', // Light Red
+  '#22c55e', // Green
+  '#ec4899', // Pink
+  '#ca8a04' // Yellow
 ];
+
+const BG_INTERVALS = [10, 20, 15, 23];
+const BG_FADE_DURATION = 3;
 
 function lerpColor(c1: string, c2: string, t: number) {
   const r1 = parseInt(c1.slice(1, 3), 16);
@@ -72,6 +73,7 @@ interface BeatGameProps {
   onFinish: (sessionHearts: number, sessionShields: number, sessionPerfects: number, difficulty: Level, completion: number) => void;
   userLevel: number;
   currentExp: number;
+  initialMode?: GameMode;
 }
 
 type PowerUpType = 'shield' | 'life1' | 'life2' | 'none';
@@ -99,10 +101,10 @@ const StarIcon = ({ active, className }: { active: boolean; className?: string }
 );
 
 export const BeatGame: React.FC<BeatGameProps> = ({
-  playlist, allSongs, onExit, globalHearts, globalShields, userPerfects, onUseCurrency, onFinish, userLevel, currentExp
+  playlist, allSongs, onExit, globalHearts, globalShields, userPerfects, onUseCurrency, onFinish, userLevel, currentExp, initialMode
 }) => {
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
-  const [selectedMode, setSelectedMode] = useState<GameMode>(playlist.length > 1 ? 'endless' : 'classic');
+  const [selectedMode, setSelectedMode] = useState<GameMode>(initialMode || (playlist.length > 1 ? 'endless' : 'classic'));
   const [showTutorial, setShowTutorial] = useState(false);
   // Removed countdown state
 
@@ -155,18 +157,30 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   const durationRef = useRef(1);
   const gameAreaRef = useRef<HTMLDivElement>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
+
+  // Background transition state
+  const bgRef = useRef({
+    prevColor: BG_PALETTE[0],
+    currColor: BG_PALETTE[0],
+    nextColor: BG_PALETTE[Math.floor(Math.random() * BG_PALETTE.length)],
+    lastChangeTime: 0,
+    nextInterval: BG_INTERVALS[Math.floor(Math.random() * BG_INTERVALS.length)]
+  });
+
   const isDraggingRef = useRef(false);
 
   // Initialize shuffle queue for endless mode
   React.useEffect(() => {
     if (selectedMode === 'endless' && allSongs && allSongs.length > 0) {
-      // Filter out the current song from the shuffle initially to avoid immediate repeat if possible?
-      // Or just shuffle all. Let's shuffle all.
-      const shuffled = [...allSongs].sort(() => Math.random() - 0.5);
+      // Ensure the first song in the playlist is at the start of the queue
+      const baseTrack = playlist[0];
+      const otherSongs = allSongs.filter(s => s.id !== baseTrack?.id);
+      const shuffled = [baseTrack, ...otherSongs.sort(() => Math.random() - 0.5)].filter(Boolean) as AudioAnalysis[];
+
       setShuffleQueue(shuffled);
       setQueueIndex(0);
     }
-  }, [selectedMode, allSongs]);
+  }, [selectedMode, allSongs, playlist]);
 
   const currentSong = selectedMode === 'endless' && shuffleQueue.length > 0
     ? shuffleQueue[queueIndex]
@@ -200,6 +214,9 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     setIsFailing(false);
     setActiveLives(5);
     setReviveCount(0);
+
+    // Reset background transition time for new song
+    bgRef.current.lastChangeTime = 0;
 
     // Load the new song
     loadTrackNotes(nextSong);
@@ -551,6 +568,9 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     setScore(0); setCombo(0); setSessionHearts(0); setSessionShields(0); setSessionPerfects(0); setPlayerLane(1);
     setIsActive(true); setIsPaused(false); setIsGameOver(false); setIsCleared(false); setInvincible(false);
 
+    // Reset background transition time
+    bgRef.current.lastChangeTime = 0;
+
     // Immediate Start with Slow Motion Ramp
     if (audioRef.current) {
       audioRef.current.src = startSong.fileUrl || '';
@@ -731,20 +751,22 @@ export const BeatGame: React.FC<BeatGameProps> = ({
       ctx.translate((Math.random() - 0.5) * currentShake, (Math.random() - 0.5) * currentShake);
 
       ctx.clearRect(0, 0, w, h);
-      // Background Dynamic Gradient
-      const cycleDuration = 5; // Change color every 5 seconds
-      const colorProgress = (displayTime / cycleDuration) % GAME_COLORS.length;
-      const index = Math.floor(colorProgress);
-      const nextIndex = (index + 1) % GAME_COLORS.length;
-      const prevIndex = (index - 1 + GAME_COLORS.length) % GAME_COLORS.length;
-      const tLerp = colorProgress % 1;
 
-      const dynamicBgColorTop = lerpColor(GAME_COLORS[index], GAME_COLORS[nextIndex], tLerp);
+      // Update Background State
+      if (displayTime >= bgRef.current.lastChangeTime + bgRef.current.nextInterval) {
+        bgRef.current.prevColor = bgRef.current.currColor;
+        bgRef.current.currColor = bgRef.current.nextColor;
+        bgRef.current.nextColor = BG_PALETTE[Math.floor(Math.random() * BG_PALETTE.length)];
+        bgRef.current.lastChangeTime = displayTime;
+        bgRef.current.nextInterval = BG_INTERVALS[Math.floor(Math.random() * BG_INTERVALS.length)];
+      }
 
-      const bgGradient = ctx.createLinearGradient(0, 0, 0, h);
-      bgGradient.addColorStop(0, dynamicBgColorTop);
-      bgGradient.addColorStop(1, lerpColor(GAME_COLORS[prevIndex], GAME_COLORS[index], tLerp));
-      ctx.fillStyle = bgGradient;
+      // Calculate Interpolated Color for smooth transition
+      const timeSinceChange = displayTime - bgRef.current.lastChangeTime;
+      const bgT = Math.min(1, timeSinceChange / BG_FADE_DURATION);
+      const activeBgColor = lerpColor(bgRef.current.prevColor, bgRef.current.currColor, bgT);
+
+      ctx.fillStyle = activeBgColor;
       ctx.fillRect(0, 0, w, h);
 
       // Rewind Logic during failure
@@ -893,24 +915,35 @@ export const BeatGame: React.FC<BeatGameProps> = ({
             ctx.fillStyle = note.powerUp === 'shield' ? '#2563eb' : '#16a34a'; ctx.fill();
             ctx.fillStyle = 'white'; ctx.font = 'bold 18px Inter'; ctx.textAlign = 'center';
             ctx.fillText(note.powerUp === 'shield' ? '🛡️' : '❤️', x, y + 6);
-          } else if (note.type === 'obstacle') { ctx.fillStyle = '#b91c1c'; ctx.fill(); }
-          else {
+          } else if (note.type === 'obstacle') {
+            ctx.fillStyle = '#b91c1c'; ctx.fill();
+          } else {
             const gradient = ctx.createLinearGradient(x, y - nH / 2, x, y + nH / 2);
-            gradient.addColorStop(0, '#ffffff');
-            gradient.addColorStop(1, '#94a3b8');
+            gradient.addColorStop(0, '#c5c5c5ff'); // Blue top
+            gradient.addColorStop(1, '#ffffffff'); // Black bottom
             ctx.fillStyle = gradient;
+
+            // Outer glow for black visibility against background
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = 'rgba(37, 99, 235, 0.4)';
+
             ctx.fill();
+
+            // Inner highlight for glass look
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
           }
           ctx.restore();
         }
       });
 
-      let i = particlesRef.current.length;
-      while (i--) {
-        const p = particlesRef.current[i];
+      let iIdx = particlesRef.current.length;
+      while (iIdx--) {
+        const p = particlesRef.current[iIdx];
         p.x += p.vx; p.y += p.vy; p.life -= 0.03;
         if (p.life <= 0) {
-          particlesRef.current.splice(i, 1);
+          particlesRef.current.splice(iIdx, 1);
           continue;
         }
         ctx.globalAlpha = p.life;

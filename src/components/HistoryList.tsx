@@ -50,9 +50,9 @@ export const HistoryList: React.FC<HistoryListProps> = ({
               <div className="absolute inset-0"></div>
 
               {item.coverArt ? (
-                <img src={item.coverArt} alt="Cover" className="w-16 h-16 rounded-lg object-cover border border-white/10 shrink-0 relative z-10 bg-black/50" />
+                <img src={item.coverArt} alt="Cover" className="w-12 h-12 rounded-lg object-cover border border-white/10 shrink-0 relative z-10 bg-black/50" />
               ) : (
-                <div className="w-16 h-16 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0 relative z-10">
+                <div className="w-12 h-12 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0 relative z-10">
                   <svg className="w-6 h-6 text-white/20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
                   </svg>
