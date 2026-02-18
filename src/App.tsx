@@ -34,6 +34,42 @@ const STORAGE_KEYS = {
 
 const MAX_HEARTS = 10;
 
+const LogoutConfirmModal: React.FC<{ isOpen: boolean; onClose: () => void; onConfirm: () => void }> = ({ isOpen, onClose, onConfirm }) => {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-[300] flex items-center justify-center p-6 bg-black/40 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="w-full max-w-sm bg-[#121212] border border-white/10 rounded-[2.5rem] overflow-hidden shadow-2xl animate-in zoom-in-95 slide-in-from-bottom-10 duration-500 ease-out">
+        <div className="p-8 flex flex-col items-center text-center">
+          <div className="w-16 h-16 bg-red-500/20 text-red-500 rounded-2xl flex items-center justify-center mb-6 shadow-lg">
+            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+          </div>
+          <h3 className="text-xl font-black text-white uppercase tracking-tighter">Terminate Session?</h3>
+          <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-2 leading-relaxed">
+            Logging out will clear all local data, including your library and stats.
+          </p>
+
+          <div className="flex flex-col w-full gap-3 mt-8">
+            <button
+              onClick={onConfirm}
+              className="w-full py-4 bg-red-500 text-white font-black uppercase text-xs rounded-2xl hover:bg-red-600 transition-colors shadow-lg active:scale-95 transition-all"
+            >
+              Terminate & Logout
+            </button>
+            <button
+              onClick={onClose}
+              className="w-full py-4 bg-white/5 text-slate-400 font-black uppercase text-xs rounded-2xl hover:bg-white/10 transition-colors active:scale-95 transition-all"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const App: React.FC = () => {
   const [currentPlaylist, setCurrentPlaylist] = useState<AudioAnalysis[] | null>(null);
   const [history, setHistory] = useState<AudioAnalysis[]>([]);
@@ -90,6 +126,7 @@ const App: React.FC = () => {
     return saved !== null ? Number(saved) : 10;
   });
   const [showResourceMenu, setShowResourceMenu] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showExchangeSuccess, setShowExchangeSuccess] = useState(false);
   const [insufficientFunds, setInsufficientFunds] = useState<{ isOpen: boolean; currency: 'stars' | 'gold'; required: number } | null>(null);
 
@@ -108,6 +145,13 @@ const App: React.FC = () => {
       setShowExchangeSuccess(true);
     }
   }, [user.stars, user.perfects]);
+
+  // Auto-Shop Trigger: Show shop when resources are critically low
+  useEffect(() => {
+    if (hearts < 3 && shields < 3 && !showResourceMenu) {
+      setShowResourceMenu(true);
+    }
+  }, [hearts, shields, showResourceMenu]);
 
   const audioContextRef = useRef<AudioContext | null>(null);
 
@@ -678,7 +722,7 @@ const App: React.FC = () => {
               onBack={() => setScreen('collection')}
               user={user}
               onUpdateProfile={handleUpdateProfile}
-              onLogout={handleLogout}
+              onLogout={() => setShowLogoutConfirm(true)}
               onUpgrade={handleUpgrade}
             />
           )
@@ -728,6 +772,15 @@ const App: React.FC = () => {
           currency={insufficientFunds.currency}
         />
       )}
+
+      <LogoutConfirmModal
+        isOpen={showLogoutConfirm}
+        onClose={() => setShowLogoutConfirm(false)}
+        onConfirm={() => {
+          setShowLogoutConfirm(false);
+          handleLogout();
+        }}
+      />
     </div>
   );
 };
