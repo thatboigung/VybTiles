@@ -15,6 +15,7 @@ export interface AudioAnalysis {
   completion?: number; // Checkpoint: 0-100 percentage
   coverArt?: string; // Base64 data URL
   duration?: number; // Song length in seconds
+  lastPlayed?: number; // Timestamp of last playback
 }
 
 export interface UserStats {

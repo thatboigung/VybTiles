@@ -104,7 +104,7 @@ export const HistoryList: React.FC<HistoryListProps> = ({
           onClick={() => setOpenMenuId(null)}
         >
           <div
-            className="w-full max-w-sm bg-[#121212] border border-white/10 rounded-[2.5rem] overflow-hidden shadow-[0_22px_70px_4px_rgba(0,0,0,0.56)] animate-in zoom-in-90 slide-in-from-bottom-10 duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]"
+            className="w-full max-w-sm bg-[#0f172a]/95 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] overflow-hidden shadow-[0_22px_70px_4px_rgba(0,0,0,0.56)] animate-in zoom-in-90 slide-in-from-bottom-10 duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]"
             onClick={e => e.stopPropagation()}
           >
             <div className="p-8">

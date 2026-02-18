@@ -30,7 +30,7 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
     };
 
     return (
-        <div className="h-16 md:h-24 bg-[#181818] border-t border-[#282828] px-4 flex items-center justify-between z-[40] animate-in slide-in-from-bottom duration-500">
+        <div className="h-16 md:h-24 bg-[#0f172a] border-t border-white/5 px-4 flex items-center justify-between z-[40] animate-in slide-in-from-bottom duration-500">
             {/* Left: Song Info - Show cover art on mobile, hide text */}
             <div className="flex items-center gap-3 md:gap-4 w-12 md:w-[30%] min-w-0 shrink-0">
                 {currentSong.coverArt ? (

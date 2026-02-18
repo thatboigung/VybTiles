@@ -47,11 +47,24 @@ export const storageService = {
         const db = await this.initDB();
         const records = await db.getAllFromIndex(STORE_NAME, 'by-timestamp');
 
-        // Convert blob to URL and sort descending (newest first)
-        return records.reverse().map(record => ({
-            ...record.analysis,
-            fileUrl: URL.createObjectURL(record.file)
-        }));
+        // Convert blob to URL and sort descending (lastPlayed first, then timestamp)
+        return records
+            .map(record => ({
+                ...record.analysis,
+                fileUrl: URL.createObjectURL(record.file)
+            }))
+            .sort((a, b) => {
+                // Priority 1: lastPlayed (most recent first)
+                if (a.lastPlayed || b.lastPlayed) {
+                    const timeA = a.lastPlayed || 0;
+                    const timeB = b.lastPlayed || 0;
+                    if (timeA !== timeB) return timeB - timeA;
+                }
+                // Priority 2: timestamp (most recent upload first)
+                const tsA = a.timestamp || 0;
+                const tsB = b.timestamp || 0;
+                return tsB - tsA;
+            });
     },
 
     async deleteTrack(id: string) {

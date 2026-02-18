@@ -75,15 +75,11 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onUpload, isAnalyzin
             }}
             onClick={() => {
               if (!isAnalyzing) {
-                if (userStars >= 10) {
-                  fileInputRef.current?.click();
-                } else {
-                  setShowInsufficientFundsModal(true);
-                }
+                fileInputRef.current?.click();
               }
             }}
           >
-            <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".mp3,.wav" className="hidden" />
+            <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="audio/*" className="hidden" />
 
             {isAnalyzing ? (
               <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>

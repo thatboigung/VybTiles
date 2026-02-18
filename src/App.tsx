@@ -36,7 +36,7 @@ const LogoutConfirmModal: React.FC<{ isOpen: boolean; onClose: () => void; onCon
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-[300] flex items-center justify-center p-6 bg-black/40 backdrop-blur-sm animate-in fade-in duration-300">
-      <div className="w-full max-w-sm bg-[#121212] border border-white/10 rounded-[2.5rem] overflow-hidden shadow-2xl animate-in zoom-in-95 slide-in-from-bottom-10 duration-500 ease-out">
+      <div className="w-full max-w-sm bg-[#0f172a]/80 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] overflow-hidden shadow-2xl animate-in zoom-in-95 slide-in-from-bottom-10 duration-500 ease-out">
         <div className="p-8 flex flex-col items-center text-center">
           <div className="w-16 h-16 bg-red-500/20 text-red-500 rounded-2xl flex items-center justify-center mb-6 shadow-lg">
             <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -293,11 +293,12 @@ const App: React.FC = () => {
         console.warn("Failed to extract cover art", e);
       }
 
+      const now = Date.now();
       const newAnalysis: AudioAnalysis = {
         id: crypto.randomUUID(),
         fileName: file.name,
         fileSize: file.size,
-        timestamp: Date.now(),
+        timestamp: now,
         waveform,
         beats: beats,
         fileUrl: URL.createObjectURL(file), // Transient URL for immediate playback
@@ -315,7 +316,17 @@ const App: React.FC = () => {
       await storageService.saveTrack(newAnalysis, file);
 
       setCurrentPlaylist([newAnalysis]);
-      setHistory(prev => [newAnalysis, ...prev]);
+      setHistory(prev => {
+        const updated = [newAnalysis, ...prev];
+        return updated.sort((a, b) => {
+          if (a.lastPlayed || b.lastPlayed) {
+            const timeA = a.lastPlayed || 0;
+            const timeB = b.lastPlayed || 0;
+            if (timeA !== timeB) return timeB - timeA;
+          }
+          return (b.timestamp || 0) - (a.timestamp || 0);
+        });
+      });
       setScreen('game');
     } catch (error) {
       console.error(error);
@@ -328,6 +339,23 @@ const App: React.FC = () => {
   const handlePlayFromHistory = (item: AudioAnalysis, mode: GameMode = 'classic') => {
     // With IndexedDB, fileUrl is regenerated and valid
     if (!item.fileUrl) return alert("Error loading track. Please re-upload.");
+
+    // Update lastPlayed timestamp
+    const now = Date.now();
+    storageService.updateTrackStats(item.id, { lastPlayed: now });
+    setHistory(prev => {
+      const updated = prev.map(t => t.id === item.id ? { ...t, lastPlayed: now } : t);
+      // Re-sort history so the last played song is at history[0]
+      return updated.sort((a, b) => {
+        if (a.lastPlayed || b.lastPlayed) {
+          const timeA = a.lastPlayed || 0;
+          const timeB = b.lastPlayed || 0;
+          if (timeA !== timeB) return timeB - timeA;
+        }
+        return (b.timestamp || 0) - (a.timestamp || 0);
+      });
+    });
+
     setGameMode(mode);
     setCurrentPlaylist([item]);
     setScreen('game');
@@ -479,7 +507,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="h-screen w-screen bg-[#121212] bg-gradient-to-b from-[#333] to-black text-slate-50 flex flex-col overflow-hidden">
+    <div className="h-screen w-screen bg-[#0f172a] bg-gradient-to-b from-[#1e1b4b] to-[#0f172a] text-slate-50 flex flex-col overflow-hidden">
       {screen !== 'game' && (
         <Header
           user={user}
@@ -607,7 +635,7 @@ const App: React.FC = () => {
                       <input
                         id="hidden-file-input"
                         type="file"
-                        accept=".mp3,.wav"
+                        accept="audio/*"
                         className="hidden"
                         onChange={(e) => {
                           const file = e.target.files?.[0];

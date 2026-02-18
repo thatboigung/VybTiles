@@ -48,7 +48,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onEnter }) => {
   const slide = slides[currentSlide];
 
   return (
-    <div className="h-screen w-screen bg-[#121212] bg-gradient-to-b from-[#121212] to-black flex items-center justify-center overflow-hidden relative">
+    <div className="h-screen w-screen bg-[#0f172a] bg-gradient-to-b from-[#1e1b4b] to-[#0f172a] flex items-center justify-center overflow-hidden relative">
       <div className="relative z-10 w-full max-w-4xl px-8 flex flex-col items-center text-center">
         {/* ...existing code... */}
         <div key={slide.id} className="animate-in fade-in slide-in-from-bottom-12 duration-1000 flex flex-col items-center">

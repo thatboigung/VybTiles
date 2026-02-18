@@ -7,12 +7,10 @@ const LANES = 4;
 const TARGET_Y_RATIO = 0.8;
 
 const BG_PALETTE = [
-  '#f97316', // Orange
-  '#0ea5e9', // Skyblue
-  '#f87171', // Light Red
-  '#22c55e', // Green
-  '#ec4899', // Pink
-  '#ca8a04' // Yellow
+  '#1e1b4b', // Deep Indigo
+  '#0f172a', // Midnight Blue
+  '#312e81', // Royal Focus
+  '#111827'  // Rich Graphite
 ];
 
 const BG_INTERVALS = [10, 20, 15, 23];
@@ -919,8 +917,8 @@ export const BeatGame: React.FC<BeatGameProps> = ({
             ctx.fillStyle = '#b91c1c'; ctx.fill();
           } else {
             const gradient = ctx.createLinearGradient(x, y - nH / 2, x, y + nH / 2);
-            gradient.addColorStop(0, '#c5c5c5ff'); // Blue top
-            gradient.addColorStop(1, '#ffffffff'); // Black bottom
+            gradient.addColorStop(0, '#60a5fa'); // Sky Blue top
+            gradient.addColorStop(1, '#1e40af'); // Deep Blue bottom
             ctx.fillStyle = gradient;
 
             // Outer glow for black visibility against background
@@ -1040,7 +1038,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
         isOpen={showTutorial}
         onClose={handleCloseTutorial}
       />
-      <div className="fixed inset-0 bg-[#121212] flex justify-center items-center z-[100] select-none touch-none"
+      <div className="fixed inset-0 bg-[#0f172a] flex justify-center items-center z-[100] select-none touch-none"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={() => isDraggingRef.current = false}
@@ -1166,12 +1164,12 @@ export const BeatGame: React.FC<BeatGameProps> = ({
           {/* Countdown removed */}    {/* Start Overlay */}
           {/* Start Overlay - Spotify Style */}
           {!isActive && !isCleared && !isGameOver && (
-            <div className="absolute inset-0 bg-[#121212] flex flex-col items-center z-[110]">
+            <div className="absolute inset-0 bg-[#0f172a]/95 backdrop-blur-3xl flex flex-col items-center z-[110]">
               {/* Blurred Background Art */}
               {currentSong?.coverArt && (
                 <div className="absolute inset-0 opacity-30 blur-3xl scale-125 pointer-events-none">
                   <img src={currentSong.coverArt} className="w-full h-full object-cover" />
-                  <div className="absolute inset-0 bg-gradient-to-b from-[#121212]/50 via-[#121212]/80 to-[#121212]"></div>
+                  <div className="absolute inset-0 bg-gradient-to-b from-[#0f172a]/50 via-[#0f172a]/80 to-[#0f172a]"></div>
                 </div>
               )}
 
@@ -1189,11 +1187,11 @@ export const BeatGame: React.FC<BeatGameProps> = ({
               </div>
 
               {/* Main Content */}
-              <div className="flex-1 w-full flex flex-col items-center justify-center relative z-20 px-8 pb-12 gap-8">
+              <div className="flex-1 w-full flex flex-col items-center justify-center relative z-20 px-6 sm:px-8 py-8 sm:pb-12 gap-6 sm:gap-8">
 
                 {/* Album Art & Title */}
                 <div className="flex flex-col items-center gap-4 text-center">
-                  <div className="w-48 h-48 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden border border-white/10 relative group">
+                  <div className="w-32 h-32 sm:w-48 sm:h-48 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden border border-white/10 relative group">
                     {currentSong?.coverArt ? (
                       <img src={currentSong.coverArt} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
                     ) : (
@@ -1201,7 +1199,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                     )}
                   </div>
                   <div>
-                    <h2 className="text-2xl font-black text-white italic tracking-tighter leading-tight drop-shadow-lg max-w-[300px] mx-auto">
+                    <h2 className="text-xl sm:text-2xl font-black text-white italic tracking-tighter leading-tight drop-shadow-lg max-w-[280px] sm:max-w-[300px] mx-auto">
                       {currentSong?.fileName.replace(/\.[^/.]+$/, "")}
                     </h2>
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Ready to Sync</p>
@@ -1209,23 +1207,23 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                 </div>
 
                 {/* Settings Container */}
-                <div className="w-full max-w-xs space-y-6">
+                <div className="w-full max-w-xs space-y-4 sm:space-y-6">
 
                   {/* Selectors */}
-                  <div className="flex flex-col gap-4">
-                    <div className="bg-[#181818] p-1 rounded-lg flex">
+                  <div className="flex flex-col gap-3 sm:gap-4">
+                    <div className="w-full bg-[#1e1b4b]/40 backdrop-blur-md border border-white/5 rounded-2xl p-4 sm:p-6 flex flex-row gap-2 shadow-2xl">
                       {['classic', 'endless'].map(m => (
                         <button
                           key={m}
                           onClick={() => setSelectedMode(m as any)}
-                          className={`flex-1 py-2 text-[10px] font-black uppercase rounded-md transition-all ${selectedMode === m ? 'bg-[#282828] text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+                          className={`flex-1 py-2 text-[10px] font-black uppercase rounded-md transition-all ${selectedMode === m ? 'bg-[#312e81] text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
                         >
                           {m}
                         </button>
                       ))}
                     </div>
 
-                    <div className="bg-[#181818] p-1 rounded-lg flex">
+                    <div className="w-full bg-[#1e1b4b]/40 backdrop-blur-md border border-white/5 rounded-2xl p-4 sm:p-6 flex flex-row gap-2 shadow-2xl">
                       {['easy', 'medium', 'hard'].map(level => {
                         const l = level as Level;
                         // Logic: Easy locks at L4. Medium unlocks L2. Hard unlocks L4.
@@ -1235,7 +1233,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                           <button
                             key={l}
                             onClick={() => !isLocked && setSelectedLevel(l)}
-                            className={`flex-1 py-2 text-[10px] font-black uppercase rounded-md transition-all relative ${selectedLevel === l ? 'bg-[#282828] text-white shadow-sm' : isLocked ? 'opacity-30 cursor-not-allowed text-zinc-600' : 'text-zinc-500 hover:text-zinc-300'}`}
+                            className={`flex-1 py-2 text-[10px] font-black uppercase rounded-md transition-all relative ${selectedLevel === l ? 'bg-[#312e81] text-white shadow-sm' : isLocked ? 'opacity-30 cursor-not-allowed text-zinc-600' : 'text-zinc-500 hover:text-zinc-300'}`}
                           >
                             {l} {isLocked && <span className="absolute -top-1 -right-1 text-[8px]">🔒</span>}
                           </button>
@@ -1266,7 +1264,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
           {/* Results/Overlays */}
           {/* Pause Overlay - Spotify Style */}
           {isPaused && !isGameOver && !isCleared && (
-            <div className="absolute inset-0 bg-[#121212]/95 backdrop-blur-xl flex flex-col items-center justify-center z-[120]">
+            <div className="absolute inset-0 bg-[#0f172a]/90 backdrop-blur-2xl flex flex-col items-center justify-center z-[120]">
               <div className="flex flex-col gap-6 items-center w-full max-w-xs">
                 <h2 className="text-4xl font-black text-white italic tracking-tighter uppercase mb-4">Paused</h2>
 
@@ -1296,7 +1294,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
           {/* Game Over Screen - Spotify Style */}
           {isGameOver && (
-            <div className="absolute inset-0 bg-[#121212]/95 backdrop-blur-xl flex flex-col items-center justify-center p-6 z-[120] animate-in fade-in duration-300">
+            <div className="absolute inset-0 bg-[#111827]/95 backdrop-blur-3xl flex flex-col items-center justify-center p-6 z-[120] animate-in fade-in duration-300">
               {/* Album Art Blur Background */}
               {currentSong?.coverArt && (
                 <div className="absolute inset-0 opacity-20 blur-3xl scale-125 pointer-events-none">
@@ -1309,12 +1307,12 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
                 {/* Song Info */}
                 <div className="text-center">
-                  <p className="text-sm font-bold text-white/60 uppercase tracking-widest">Session Ended</p>
+
                   <h4 className="text-xl font-black text-white italic truncate max-w-[250px]">{currentSong?.fileName.replace(/\.[^/.]+$/, "")}</h4>
                 </div>
 
                 {/* Stats Card */}
-                <div className="w-full bg-[#181818] border border-white/5 rounded-2xl p-6 flex flex-col gap-4 shadow-2xl">
+                <div className="w-full p-6 flex flex-col gap-4 shadow-2xl">
                   <div className="flex justify-between items-center border-b border-white/5 pb-4">
                     <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Score</span>
                     <span className="text-2xl font-black text-white italic">{score.toLocaleString()}</span>
@@ -1325,8 +1323,8 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                   </div>
                   <div className="flex gap-2 mt-2">
                     <div className="flex-1 bg-white/5 rounded-lg p-2 text-center">
-                      <span className="block text-xl font-black text-white">{sessionHearts}<span className="text-red-500 text-sm">❤️</span></span>
-                      <span className="text-[9px] font-bold text-slate-500 uppercase">Salvage</span>
+                      <span className="block text-xl font-black text-white">{sessionPerfects}<span className="text-yellow-500 text-sm">⭐</span></span>
+                      <span className="text-[9px] font-bold text-slate-500 uppercase">Gold (Perfects)</span>
                     </div>
                     <div className="flex-1 bg-white/5 rounded-lg p-2 text-center">
                       <span className="block text-xl font-black text-white">{expEarned}<span className="text-blue-400 text-sm">XP</span></span>
@@ -1348,7 +1346,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                         disabled={!canAffordRevive}
                         className={`w-full py-4 rounded-full font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 transition-all
                            ${canAffordRevive
-                            ? "bg-yellow-500 text-black hover:bg-yellow-400 hover:scale-105 shadow-lg shadow-yellow-500/20"
+                            ? "bg-[#312e81] text-white hover:bg-[#312e81]/80 hover:scale-105 shadow-lg shadow-indigo-500/10"
                             : "bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-50"
                           }`}
                       >
@@ -1369,7 +1367,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                         disabled={!canAfford}
                         className={`w-full py-4 rounded-full font-black text-sm uppercase tracking-widest transition-all flex flex-col items-center justify-center leading-none gap-1
                            ${canAfford
-                            ? "bg-white text-black hover:scale-105"
+                            ? "bg-white/10 text-white border border-white/10 hover:bg-white/20 hover:scale-105"
                             : "bg-zinc-800 text-zinc-500 cursor-not-allowed"
                           }`}
                       >
@@ -1394,7 +1392,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
           {/* Success Screen - Spotify Style */}
           {isCleared && (
-            <div className="absolute inset-0 bg-[#121212]/95 backdrop-blur-xl flex flex-col items-center justify-center p-6 z-[130] animate-in fade-in duration-300">
+            <div className="absolute inset-0 bg-[#1e1b4b]/95 backdrop-blur-3xl flex flex-col items-center justify-center p-6 z-[130] animate-in fade-in duration-300">
               {/* Confetti / Glow */}
               <div className="absolute inset-0 overflow-hidden pointer-events-none">
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-green-500/10 rounded-full blur-[80px]"></div>
@@ -1444,7 +1442,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                 {/* Main Action */}
                 <button
                   onClick={handleClaimAwards}
-                  className="w-full py-4 rounded-full bg-[#1ed760] text-black font-black text-sm uppercase tracking-widest hover:bg-[#1fdf64] hover:scale-105 transition-all shadow-[0_0_20px_rgba(30,215,96,0.4)]"
+                  className="w-full py-4 rounded-full bg-[#312e81] text-white font-black text-sm uppercase tracking-widest hover:bg-[#312e81]/80 hover:scale-105 transition-all shadow-[0_0_20px_rgba(49,46,129,0.3)]"
                 >
                   Claim Rewards
                 </button>
