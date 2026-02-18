@@ -509,7 +509,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="h-screen w-screen bg-[#0f172a] bg-gradient-to-b from-[#1e1b4b] to-[#0f172a] text-slate-50 flex flex-col overflow-hidden">
+    <div className="h-screen w-screen bg-[#0f172a] bg-gradient-to-b from-black/60 via-[#1e1b4b] to-[#0f172a] text-slate-50 flex flex-col overflow-hidden">
       {screen !== 'game' && (
         <Header
           user={user}
@@ -550,7 +550,7 @@ const App: React.FC = () => {
           <div className="h-full container mx-auto p-2 overflow-y-auto no-scrollbar relative">
             <div className="max-w-5xl mx-auto space-y-0 relative z-10">
               {/* Hero Section */}
-              <section className="flex items-center gap-6 p-4 md:p-6 bg-gradient-to-b from-black/40 to-transparent rounded-3xl mb-8">
+              <section className="flex items-center gap-6 p-4 md:p-6 bg-black/10 rounded-3xl mb-8">
 
 
                 {/* Hero Info */}
