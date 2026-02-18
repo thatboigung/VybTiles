@@ -12,9 +12,9 @@ const BG_PALETTE = [
   '#312e81', // Royal Focus
   '#111827', // Rich Graphite
   '#2e1065', // Deep Purple
-  '#272727ff', // Dark Red
-  '#500724', // Deep Pink
-  '#422006'  // Dark Amber/Yellow
+  '#181818ff', // Dark Red
+  '#6d032eff', // Deep Pink
+  '#924002ff'  // Dark Amber/Yellow
 ];
 
 const BG_INTERVALS = [10, 20, 15, 23];
@@ -111,13 +111,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   const [showTutorial, setShowTutorial] = useState(false);
   // Removed countdown state
 
-  // Determine initial valid level
-  const getInitialLevel = (): Level => {
-    if (userLevel >= 4) return 'medium'; // Easy locks at level 4
-    return 'easy';
-  };
-
-  const [selectedLevel, setSelectedLevel] = useState<Level>(getInitialLevel());
+  const [selectedLevel] = useState<Level>('medium');
   const [isActive, setIsActive] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
 
@@ -1179,105 +1173,6 @@ export const BeatGame: React.FC<BeatGameProps> = ({
           <div className="flex-1 relative overflow-hidden bg-[#0f172a]">
 
             {/* Countdown Overlay */}
-            {/* Countdown removed */}    {/* Start Overlay */}
-            {/* Start Overlay - Spotify Style */}
-            {!isActive && !isCleared && !isGameOver && (
-              <div className="absolute inset-0 bg-[#0f172a]/95 backdrop-blur-3xl flex flex-col items-center z-[110]">
-                {/* Blurred Background Art */}
-                {currentSong?.coverArt && (
-                  <div className="absolute inset-0 opacity-30 blur-3xl scale-125 pointer-events-none">
-                    <img src={currentSong.coverArt} className="w-full h-full object-cover" />
-                    <div className="absolute inset-0 bg-gradient-to-b from-[#0f172a]/50 via-[#0f172a]/80 to-[#0f172a]"></div>
-                  </div>
-                )}
-
-                {/* Top Bar (Abort & Resources) */}
-                <div className="w-full p-6 flex justify-between items-center relative z-20">
-                  <button onClick={handleAbort} className="w-10 h-10 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center text-white hover:bg-white/10 transition-all">
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                  </button>
-
-                  <div className="flex items-center gap-2 bg-black/40 backdrop-blur-md px-4 py-2 rounded-full border border-white/5">
-                    <span className="text-xs font-bold text-white flex items-center gap-1">{globalHearts}<span className="text-red-500 text-[10px]">❤️</span></span>
-                    <div className="w-px h-3 bg-white/10"></div>
-                    <span className="text-xs font-bold text-white flex items-center gap-1">{globalShields}<span className="text-blue-500 text-[10px]">🛡️</span></span>
-                  </div>
-                </div>
-
-                {/* Main Content */}
-                <div className="flex-1 w-full flex flex-col items-center justify-center relative z-20 px-6 sm:px-8 py-8 sm:pb-12 gap-6 sm:gap-8">
-
-                  {/* Album Art & Title */}
-                  <div className="flex flex-col items-center gap-4 text-center">
-                    <div className="w-32 h-32 sm:w-48 sm:h-48 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden border border-white/10 relative group">
-                      {currentSong?.coverArt ? (
-                        <img src={currentSong.coverArt} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
-                      ) : (
-                        <div className="w-full h-full bg-zinc-800 flex items-center justify-center"><span className="text-4xl">🎵</span></div>
-                      )}
-                    </div>
-                    <div>
-                      <h2 className="text-xl sm:text-2xl font-black text-white italic tracking-tighter leading-tight drop-shadow-lg max-w-[280px] sm:max-w-[300px] mx-auto truncate">
-                        {currentSong?.fileName.replace(/\.[^/.]+$/, "")}
-                      </h2>
-                      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Ready to Play</p>
-                    </div>
-                  </div>
-
-                  {/* Settings Container */}
-                  <div className="w-full max-w-xs space-y-4 sm:space-y-6">
-
-                    {/* Selectors */}
-                    <div className="flex flex-col gap-3 sm:gap-4">
-                      <div className="w-full bg-[#1e1b4b]/40 backdrop-blur-md border border-white/5 rounded-2xl p-4 sm:p-6 flex flex-row gap-2 shadow-2xl">
-                        {['classic', 'endless'].map(m => (
-                          <button
-                            key={m}
-                            onClick={() => setSelectedMode(m as any)}
-                            className={`flex-1 py-2 text-[10px] font-black uppercase rounded-md transition-all ${selectedMode === m ? 'bg-[#312e81] text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
-                          >
-                            {m}
-                          </button>
-                        ))}
-                      </div>
-
-                      <div className="w-full bg-[#1e1b4b]/40 backdrop-blur-md border border-white/5 rounded-2xl p-4 sm:p-6 flex flex-row gap-2 shadow-2xl">
-                        {['easy', 'medium', 'hard'].map(level => {
-                          const l = level as Level;
-                          // Logic: Easy locks at L4. Medium unlocks L2. Hard unlocks L4.
-                          const isLocked = (l === 'easy' && userLevel >= 4) || (l === 'medium' && userLevel < 2) || (l === 'hard' && userLevel < 4);
-
-                          return (
-                            <button
-                              key={l}
-                              onClick={() => !isLocked && setSelectedLevel(l)}
-                              className={`flex-1 py-2 text-[10px] font-black uppercase rounded-md transition-all relative ${selectedLevel === l ? 'bg-[#312e81] text-white shadow-sm' : isLocked ? 'opacity-30 cursor-not-allowed text-zinc-600' : 'text-zinc-500 hover:text-zinc-300'}`}
-                            >
-                              {l} {isLocked && <span className="absolute -top-1 -right-1 text-[8px]">🔒</span>}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Play Button */}
-                    {(() => {
-                      const { canAfford } = checkCanAfford();
-                      return (
-                        <button
-                          onClick={canAfford ? startGame : undefined}
-                          className={`w-full py-4 rounded-full font-black text-sm uppercase tracking-widest transition-all transform active:scale-95 shadow-xl flex items-center justify-center gap-2
-                              ${canAfford ? 'bg-[#1ed760] text-black hover:bg-[#1fdf64] hover:scale-105' : 'bg-red-900/20 text-red-500 border border-red-500/20 cursor-not-allowed'}`}
-                        >
-                          {canAfford ? 'START' : 'INSUFFICIENT FUNDS'}
-                        </button>
-                      );
-                    })()}
-                  </div>
-
-                </div>
-              </div>
-            )}
 
             {/* Overlays Layer (Behind the Drawer) */}
             <div className="absolute inset-0 z-0">
@@ -1549,24 +1444,6 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                               {m}
                             </button>
                           ))}
-                        </div>
-
-                        <div className="w-full bg-[#1e1b4b]/40 backdrop-blur-md border border-white/5 rounded-2xl p-4 sm:p-6 flex flex-row gap-2 shadow-2xl">
-                          {['easy', 'medium', 'hard'].map(level => {
-                            const l = level as Level;
-                            // Logic: Easy locks at L4. Medium unlocks L2. Hard unlocks L4.
-                            const isLocked = (l === 'easy' && userLevel >= 4) || (l === 'medium' && userLevel < 2) || (l === 'hard' && userLevel < 4);
-
-                            return (
-                              <button
-                                key={l}
-                                onClick={() => !isLocked && setSelectedLevel(l)}
-                                className={`flex-1 py-2 text-[10px] font-black uppercase rounded-md transition-all relative ${selectedLevel === l ? 'bg-[#312e81] text-white shadow-sm' : isLocked ? 'opacity-30 cursor-not-allowed text-zinc-600' : 'text-zinc-500 hover:text-zinc-300'}`}
-                              >
-                                {l} {isLocked && <span className="absolute -top-1 -right-1 text-[8px]">🔒</span>}
-                              </button>
-                            );
-                          })}
                         </div>
                       </div>
 

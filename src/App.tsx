@@ -542,7 +542,7 @@ const App: React.FC = () => {
               ))}
             </div>
             <h3 className="text-4xl font-black italic text-white uppercase tracking-widest animate-pulse">{analysisStep}</h3>
-            <p className="text-slate-500 text-xs mt-2 font-bold tracking-widest">CORE_SYNC_V2 ENGINE PROCESSING</p>
+            <p className="text-slate-500 text-xs mt-2 font-bold tracking-widest">GAV3NA ENGINE PROCESSING</p>
           </div>
         )}
 
@@ -645,7 +645,19 @@ const App: React.FC = () => {
                       <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24"><path d="M6 10c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm12 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm-6 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" /></svg>
                     </button>
                   </div>
-
+                  <div className="flex items-center justify-between px-0 pt-5 sticky top-0 z-10 py-0 ">
+                    <h2 className=" font-black italic text-gray-500"></h2>
+                    <div className="relative group">
+                      <input
+                        type="text"
+                        placeholder="Search..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="bg-transparent text-right text-xs font-bold text-white placeholder:text-slate-600 focus:outline-none w-24 focus:w-40 transition-all"
+                      />
+                      <div className="absolute right-0 bottom-0 h-px w-full bg-white/10 group-focus-within:bg-white/50 transition-colors"></div>
+                    </div>
+                  </div>
 
                 </div>
               </section>
@@ -653,19 +665,7 @@ const App: React.FC = () => {
 
 
               {/* History List Header */}
-              <div className="flex items-center justify-between px-0 pt-5 sticky top-0 z-10 py-0 ">
-                <h2 className=" font-black italic text-gray-500"></h2>
-                <div className="relative group">
-                  <input
-                    type="text"
-                    placeholder="Search..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="bg-transparent text-right text-xs font-bold text-white placeholder:text-slate-600 focus:outline-none w-24 focus:w-40 transition-all"
-                  />
-                  <div className="absolute right-0 bottom-0 h-px w-full bg-white/10 group-focus-within:bg-white/50 transition-colors"></div>
-                </div>
-              </div>
+
 
               {/* History List at bottom */}
               <div className="px-0 pb-16">
