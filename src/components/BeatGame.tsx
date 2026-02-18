@@ -10,7 +10,11 @@ const BG_PALETTE = [
   '#1e1b4b', // Deep Indigo
   '#0f172a', // Midnight Blue
   '#312e81', // Royal Focus
-  '#111827'  // Rich Graphite
+  '#111827', // Rich Graphite
+  '#2e1065', // Deep Purple
+  '#272727ff', // Dark Red
+  '#500724', // Deep Pink
+  '#422006'  // Dark Amber/Yellow
 ];
 
 const BG_INTERVALS = [10, 20, 15, 23];
@@ -42,7 +46,7 @@ const TutorialModal: React.FC<{ mode: string; isOpen: boolean; onClose: () => vo
               <li><span className="text-blue-400 font-bold">TAP</span> tiles anywhere in their lane as they fall.</li>
               <li><span className="text-red-500 font-bold">DON'T</span> tap empty space (penalty).</li>
               <li><span className="text-red-500 font-bold">DON'T</span> let tiles pass (failure).</li>
-              <li>Collect ❤️ and 🛡️ to stay in the sync.</li>
+              <li>Collect ❤️ and 🛡️ to stay in the rhythm.</li>
             </ul>
           </div>
         </div>
@@ -72,6 +76,7 @@ interface BeatGameProps {
   userLevel: number;
   currentExp: number;
   initialMode?: GameMode;
+  onStartPlay?: (track: AudioAnalysis) => void;
 }
 
 type PowerUpType = 'shield' | 'life1' | 'life2' | 'none';
@@ -99,7 +104,7 @@ const StarIcon = ({ active, className }: { active: boolean; className?: string }
 );
 
 export const BeatGame: React.FC<BeatGameProps> = ({
-  playlist, allSongs, onExit, globalHearts, globalShields, userPerfects, onUseCurrency, onFinish, userLevel, currentExp, initialMode
+  playlist, allSongs, onExit, globalHearts, globalShields, userPerfects, onUseCurrency, onFinish, userLevel, currentExp, initialMode, onStartPlay
 }) => {
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
   const [selectedMode, setSelectedMode] = useState<GameMode>(initialMode || (playlist.length > 1 ? 'endless' : 'classic'));
@@ -132,6 +137,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   const [sessionShields, setSessionShields] = useState(0);
   const [sessionPerfects, setSessionPerfects] = useState(0);
   const [reviveCount, setReviveCount] = useState(0);
+  const [coverArtElement, setCoverArtElement] = useState<HTMLImageElement | null>(null);
   // @ts-ignore - activeLives used in logic but not render currently
   const [activeLives, setActiveLives] = useState(5);
   const [shake, setShake] = useState(0);
@@ -183,6 +189,18 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   const currentSong = selectedMode === 'endless' && shuffleQueue.length > 0
     ? shuffleQueue[queueIndex]
     : playlist[currentTrackIndex];
+
+  // Preload cover art for canvas
+  useEffect(() => {
+    if (currentSong?.coverArt) {
+      const img = new Image();
+      img.src = currentSong.coverArt;
+      img.onload = () => setCoverArtElement(img);
+      img.onerror = () => setCoverArtElement(null);
+    } else {
+      setCoverArtElement(null);
+    }
+  }, [currentSong?.coverArt]);
 
 
   // Auto-advance to next song in endless mode
@@ -306,7 +324,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
           audioEffectRef.current = requestAnimationFrame(slowdown);
         }
 
-        // Delay Game Over Menu by 1s (Sync with audio slowdown)
+        // Delay Game Over Menu by 1s (Match with audio slowdown)
         setTimeout(() => {
           setIsFailing(false);
           setIsGameOver(true);
@@ -575,6 +593,9 @@ export const BeatGame: React.FC<BeatGameProps> = ({
       audioRef.current.currentTime = 0;
       rampAudioToSpeed(1.0, 3000);
     }
+
+    // Notify parent that playback has truly begun
+    if (onStartPlay) onStartPlay(startSong);
   };
 
   // Removed Countdown Effect
@@ -597,7 +618,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   const handleFinish = () => {
     if (selectedMode === 'endless') {
       loadNextSongInEndless();
-      showFeedback('SYNC EXTENDED', 'text-blue-400', 1.2);
+      showFeedback('BEAT EXTENDED', 'text-blue-400', 1.2);
     } else {
       // EXP Formula: Base 300 + Performance
       const earned = 300 + (sessionPerfects * 10);
@@ -865,7 +886,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
               note.missed = true;
               setScore(s => Math.max(0, s - 300));
               handleFailure(note.id);
-              showFeedback('SYNC FAIL', 'text-red-500', 1.0);
+              showFeedback('BEAT MISSED', 'text-red-500', 1.0);
               return;
             }
           }
@@ -897,12 +918,9 @@ export const BeatGame: React.FC<BeatGameProps> = ({
           // Flash effect for failed note
           if (isFailing && note.id === failedNoteId) {
             const flash = Math.sin(Date.now() / 50); // Fast blink
-            ctx.shadowColor = flash > 0 ? 'red' : 'transparent';
-            ctx.shadowBlur = 30;
             ctx.fillStyle = flash > 0 ? '#ff0000' : '#ffffff';
           } else if (note.type === 'tile') {
-            ctx.shadowBlur = 10;
-            ctx.shadowColor = 'rgba(255,255,255,0.2)';
+            // No shadow/glow
           }
 
           ctx.beginPath();
@@ -910,27 +928,39 @@ export const BeatGame: React.FC<BeatGameProps> = ({
           if (isFailing && note.id === failedNoteId) {
             ctx.fill(); // Already set style above
           } else if (note.type === 'powerup') {
-            ctx.fillStyle = note.powerUp === 'shield' ? '#2563eb' : '#16a34a'; ctx.fill();
-            ctx.fillStyle = 'white'; ctx.font = 'bold 18px Inter'; ctx.textAlign = 'center';
-            ctx.fillText(note.powerUp === 'shield' ? '🛡️' : '❤️', x, y + 6);
+            // Background refinement
+            if (coverArtElement) {
+              ctx.save();
+              ctx.clip(); // Clip to the roundRect path defined above
+              ctx.drawImage(coverArtElement, x - nW / 2, y - nH / 2, nW, nH);
+              // Slight darkening overlay for better icon contrast
+              ctx.fillStyle = 'rgba(0,0,0,0.1)';
+              ctx.fill();
+              ctx.restore();
+            } else {
+              ctx.fillStyle = 'white';
+              ctx.fill();
+            }
+
+            // Power-up Icon with shadow
+            ctx.save();
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = 'rgba(0,0,0,0.5)';
+            ctx.fillStyle = (note.powerUp === 'shield' || !coverArtElement) ? 'white' : '#fff';
+            ctx.font = 'bold 22px Inter';
+            ctx.textAlign = 'center';
+            ctx.fillText(note.powerUp === 'shield' ? '🛡️' : '❤️', x, y + 8);
+            ctx.restore();
           } else if (note.type === 'obstacle') {
             ctx.fillStyle = '#b91c1c'; ctx.fill();
           } else {
-            const gradient = ctx.createLinearGradient(x, y - nH / 2, x, y + nH / 2);
-            gradient.addColorStop(0, '#60a5fa'); // Sky Blue top
-            gradient.addColorStop(1, '#1e40af'); // Deep Blue bottom
-            ctx.fillStyle = gradient;
-
-            // Outer glow for black visibility against background
-            ctx.shadowBlur = 15;
-            ctx.shadowColor = 'rgba(37, 99, 235, 0.4)';
-
+            const grad = ctx.createLinearGradient(x, y - nH / 2, x, y + nH / 2);
+            grad.addColorStop(0.10, '#eeeeeeff'); // White highlight at top
+            grad.addColorStop(0.15, '#eeeeeeff');              // Blend into bg color
+            grad.addColorStop(1, '#ffffffff');
+            ctx.fillStyle = grad;
             ctx.fill();
-
-            // Inner highlight for glass look
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-            ctx.lineWidth = 1;
-            ctx.stroke();
+            // Borders removed as requested
           }
           ctx.restore();
         }
@@ -1050,15 +1080,14 @@ export const BeatGame: React.FC<BeatGameProps> = ({
         />
 
         <div ref={gameAreaRef} className={`relative w-full h-full 
-          lg:w-[480px] lg:h-full lg:rounded-none lg:border-x lg:border-white/10 lg:shadow-2xl lg:overflow-hidden
-          bg-transparent overflow-hidden 
+          lg:w-[480px] lg:h-full lg:rounded-none lg:border-x lg:border-white/10 lg:shadow-2xl 
+          bg-transparent overflow-hidden flex flex-col
           animate-in fade-in zoom-in-95 duration-200 
           ${isExiting ? 'animate-out fade-out zoom-out-95 duration-200 fill-mode-forwards' : ''}
         `}>
 
-          {/* HUD - Spotify Inspired */}
-          <div className="absolute top-0 left-0 right-0 p-4 z-50 pointer-events-none flex flex-col gap-2">
-
+          {/* HUD - Separate Top Section */}
+          <div className="w-full p-4 z-[100] relative bg-[#0f172a] ">
             {/* Top Row: Art + Stats + Pause */}
             <div className="flex items-center justify-between gap-3">
 
@@ -1083,9 +1112,8 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                 )}
               </div>
 
-              {/* Right: Stats Pills Row */}
               {/* Right: Unified Stats & Progress Card */}
-              <div className="flex-1 min-w-0 bg-[#222]/20 backdrop-blur-md  rounded-2xl overflow-hidden flex flex-col shadow-xl">
+              <div className="flex-1 min-w-0 overflow-hidden flex flex-col shadow-xl ">
 
                 {/* Top: Song Info & Stats */}
                 <div className="flex items-center justify-between px-3 py-2 gap-3">
@@ -1145,310 +1173,423 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                 </div>
               </div>
             </div>
+          </div>
 
+          {/* Interactive Screen Area (Behind/Drawer) */}
+          <div className="flex-1 relative overflow-hidden bg-[#0f172a]">
 
+            {/* Countdown Overlay */}
+            {/* Countdown removed */}    {/* Start Overlay */}
+            {/* Start Overlay - Spotify Style */}
+            {!isActive && !isCleared && !isGameOver && (
+              <div className="absolute inset-0 bg-[#0f172a]/95 backdrop-blur-3xl flex flex-col items-center z-[110]">
+                {/* Blurred Background Art */}
+                {currentSong?.coverArt && (
+                  <div className="absolute inset-0 opacity-30 blur-3xl scale-125 pointer-events-none">
+                    <img src={currentSong.coverArt} className="w-full h-full object-cover" />
+                    <div className="absolute inset-0 bg-gradient-to-b from-[#0f172a]/50 via-[#0f172a]/80 to-[#0f172a]"></div>
+                  </div>
+                )}
 
-            {/* Combo Display (floating) */}
-            {combo > 1 && (
-              <div className="absolute top-24 right-4 flex flex-col items-end animate-in zoom-in-50 slide-in-from-right-8 fade-in duration-200 pointer-events-none">
-                <span className="text-5xl font-black text-white italic leading-none drop-shadow-[0_0_15px_rgba(255,255,255,0.3)] tracking-tighter">{combo}</span>
-                <span className="text-[8px] font-black text-white/50 uppercase tracking-[0.3em]">COMBO</span>
+                {/* Top Bar (Abort & Resources) */}
+                <div className="w-full p-6 flex justify-between items-center relative z-20">
+                  <button onClick={handleAbort} className="w-10 h-10 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center text-white hover:bg-white/10 transition-all">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+
+                  <div className="flex items-center gap-2 bg-black/40 backdrop-blur-md px-4 py-2 rounded-full border border-white/5">
+                    <span className="text-xs font-bold text-white flex items-center gap-1">{globalHearts}<span className="text-red-500 text-[10px]">❤️</span></span>
+                    <div className="w-px h-3 bg-white/10"></div>
+                    <span className="text-xs font-bold text-white flex items-center gap-1">{globalShields}<span className="text-blue-500 text-[10px]">🛡️</span></span>
+                  </div>
+                </div>
+
+                {/* Main Content */}
+                <div className="flex-1 w-full flex flex-col items-center justify-center relative z-20 px-6 sm:px-8 py-8 sm:pb-12 gap-6 sm:gap-8">
+
+                  {/* Album Art & Title */}
+                  <div className="flex flex-col items-center gap-4 text-center">
+                    <div className="w-32 h-32 sm:w-48 sm:h-48 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden border border-white/10 relative group">
+                      {currentSong?.coverArt ? (
+                        <img src={currentSong.coverArt} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
+                      ) : (
+                        <div className="w-full h-full bg-zinc-800 flex items-center justify-center"><span className="text-4xl">🎵</span></div>
+                      )}
+                    </div>
+                    <div>
+                      <h2 className="text-xl sm:text-2xl font-black text-white italic tracking-tighter leading-tight drop-shadow-lg max-w-[280px] sm:max-w-[300px] mx-auto truncate">
+                        {currentSong?.fileName.replace(/\.[^/.]+$/, "")}
+                      </h2>
+                      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Ready to Play</p>
+                    </div>
+                  </div>
+
+                  {/* Settings Container */}
+                  <div className="w-full max-w-xs space-y-4 sm:space-y-6">
+
+                    {/* Selectors */}
+                    <div className="flex flex-col gap-3 sm:gap-4">
+                      <div className="w-full bg-[#1e1b4b]/40 backdrop-blur-md border border-white/5 rounded-2xl p-4 sm:p-6 flex flex-row gap-2 shadow-2xl">
+                        {['classic', 'endless'].map(m => (
+                          <button
+                            key={m}
+                            onClick={() => setSelectedMode(m as any)}
+                            className={`flex-1 py-2 text-[10px] font-black uppercase rounded-md transition-all ${selectedMode === m ? 'bg-[#312e81] text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+                          >
+                            {m}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="w-full bg-[#1e1b4b]/40 backdrop-blur-md border border-white/5 rounded-2xl p-4 sm:p-6 flex flex-row gap-2 shadow-2xl">
+                        {['easy', 'medium', 'hard'].map(level => {
+                          const l = level as Level;
+                          // Logic: Easy locks at L4. Medium unlocks L2. Hard unlocks L4.
+                          const isLocked = (l === 'easy' && userLevel >= 4) || (l === 'medium' && userLevel < 2) || (l === 'hard' && userLevel < 4);
+
+                          return (
+                            <button
+                              key={l}
+                              onClick={() => !isLocked && setSelectedLevel(l)}
+                              className={`flex-1 py-2 text-[10px] font-black uppercase rounded-md transition-all relative ${selectedLevel === l ? 'bg-[#312e81] text-white shadow-sm' : isLocked ? 'opacity-30 cursor-not-allowed text-zinc-600' : 'text-zinc-500 hover:text-zinc-300'}`}
+                            >
+                              {l} {isLocked && <span className="absolute -top-1 -right-1 text-[8px]">🔒</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Play Button */}
+                    {(() => {
+                      const { canAfford } = checkCanAfford();
+                      return (
+                        <button
+                          onClick={canAfford ? startGame : undefined}
+                          className={`w-full py-4 rounded-full font-black text-sm uppercase tracking-widest transition-all transform active:scale-95 shadow-xl flex items-center justify-center gap-2
+                              ${canAfford ? 'bg-[#1ed760] text-black hover:bg-[#1fdf64] hover:scale-105' : 'bg-red-900/20 text-red-500 border border-red-500/20 cursor-not-allowed'}`}
+                        >
+                          {canAfford ? 'START' : 'INSUFFICIENT FUNDS'}
+                        </button>
+                      );
+                    })()}
+                  </div>
+
+                </div>
               </div>
             )}
 
-          </div>
+            {/* Overlays Layer (Behind the Drawer) */}
+            <div className="absolute inset-0 z-0">
+              {/* Pause Overlay - Spotify Style */}
+              {isPaused && !isGameOver && !isCleared && (
+                <div className="absolute inset-0 bg-[#0f172a]/90 backdrop-blur-2xl flex flex-col items-center justify-center z-[120]">
+                  <div className="flex flex-col gap-6 items-center w-full max-w-xs">
+                    <h2 className="text-4xl font-black text-white italic tracking-tighter uppercase mb-4">Paused</h2>
 
-          <canvas ref={canvasRef} width={450} height={800} className="w-full h-full" />
+                    <button
+                      onClick={() => { setIsPaused(false); audioRef.current?.play(); }}
+                      className="w-full py-4 rounded-full bg-white text-black font-black text-sm uppercase tracking-widest hover:scale-105 transition-transform"
+                    >
+                      Resume
+                    </button>
 
-          {/* Countdown Overlay */}
-          {/* Countdown removed */}    {/* Start Overlay */}
-          {/* Start Overlay - Spotify Style */}
-          {!isActive && !isCleared && !isGameOver && (
-            <div className="absolute inset-0 bg-[#0f172a]/95 backdrop-blur-3xl flex flex-col items-center z-[110]">
-              {/* Blurred Background Art */}
-              {currentSong?.coverArt && (
-                <div className="absolute inset-0 opacity-30 blur-3xl scale-125 pointer-events-none">
-                  <img src={currentSong.coverArt} className="w-full h-full object-cover" />
-                  <div className="absolute inset-0 bg-gradient-to-b from-[#0f172a]/50 via-[#0f172a]/80 to-[#0f172a]"></div>
+                    <button
+                      onClick={restartSession}
+                      className="w-full py-4 rounded-full bg-transparent border border-white/20 text-white font-bold text-sm uppercase tracking-widest hover:bg-white/10 transition-colors"
+                    >
+                      Restart
+                    </button>
+
+                    <button
+                      onClick={handleAbort}
+                      className="text-xs font-bold text-slate-500 uppercase tracking-widest hover:text-white transition-colors mt-4"
+                    >
+                      Quit Game
+                    </button>
+                  </div>
                 </div>
               )}
 
-              {/* Top Bar (Abort & Resources) */}
-              <div className="w-full p-6 flex justify-between items-center relative z-20">
-                <button onClick={handleAbort} className="w-10 h-10 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center text-white hover:bg-white/10 transition-all">
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                </button>
+              {/* Game Over Screen - Spotify Style */}
+              {isGameOver && (
+                <div className="absolute inset-0 bg-[#111827]/95 backdrop-blur-3xl flex flex-col items-center justify-center p-6 z-[120] animate-in fade-in duration-300">
+                  {/* Album Art Blur Background */}
+                  {currentSong?.coverArt && (
+                    <div className="absolute inset-0 opacity-20 blur-3xl scale-125 pointer-events-none">
+                      <img src={currentSong.coverArt} className="w-full h-full object-cover grayscale" />
+                    </div>
+                  )}
 
-                <div className="flex items-center gap-2 bg-black/40 backdrop-blur-md px-4 py-2 rounded-full border border-white/5">
-                  <span className="text-xs font-bold text-white flex items-center gap-1">{globalHearts}<span className="text-red-500 text-[10px]">❤️</span></span>
-                  <div className="w-px h-3 bg-white/10"></div>
-                  <span className="text-xs font-bold text-white flex items-center gap-1">{globalShields}<span className="text-blue-500 text-[10px]">🛡️</span></span>
-                </div>
-              </div>
+                  <div className="max-w-sm w-full relative z-10 flex flex-col items-center gap-6">
+                    <h3 className="text-5xl font-black italic text-white uppercase tracking-tighter drop-shadow-xl">Game Over</h3>
 
-              {/* Main Content */}
-              <div className="flex-1 w-full flex flex-col items-center justify-center relative z-20 px-6 sm:px-8 py-8 sm:pb-12 gap-6 sm:gap-8">
-
-                {/* Album Art & Title */}
-                <div className="flex flex-col items-center gap-4 text-center">
-                  <div className="w-32 h-32 sm:w-48 sm:h-48 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden border border-white/10 relative group">
-                    {currentSong?.coverArt ? (
-                      <img src={currentSong.coverArt} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
-                    ) : (
-                      <div className="w-full h-full bg-zinc-800 flex items-center justify-center"><span className="text-4xl">🎵</span></div>
-                    )}
-                  </div>
-                  <div>
-                    <h2 className="text-xl sm:text-2xl font-black text-white italic tracking-tighter leading-tight drop-shadow-lg max-w-[280px] sm:max-w-[300px] mx-auto">
-                      {currentSong?.fileName.replace(/\.[^/.]+$/, "")}
-                    </h2>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Ready to Sync</p>
-                  </div>
-                </div>
-
-                {/* Settings Container */}
-                <div className="w-full max-w-xs space-y-4 sm:space-y-6">
-
-                  {/* Selectors */}
-                  <div className="flex flex-col gap-3 sm:gap-4">
-                    <div className="w-full bg-[#1e1b4b]/40 backdrop-blur-md border border-white/5 rounded-2xl p-4 sm:p-6 flex flex-row gap-2 shadow-2xl">
-                      {['classic', 'endless'].map(m => (
-                        <button
-                          key={m}
-                          onClick={() => setSelectedMode(m as any)}
-                          className={`flex-1 py-2 text-[10px] font-black uppercase rounded-md transition-all ${selectedMode === m ? 'bg-[#312e81] text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
-                        >
-                          {m}
-                        </button>
-                      ))}
+                    {/* Song Info */}
+                    <div className="text-center">
+                      <h4 className="text-xl font-black text-white italic truncate max-w-[250px]">{currentSong?.fileName.replace(/\.[^/.]+$/, "")}</h4>
                     </div>
 
-                    <div className="w-full bg-[#1e1b4b]/40 backdrop-blur-md border border-white/5 rounded-2xl p-4 sm:p-6 flex flex-row gap-2 shadow-2xl">
-                      {['easy', 'medium', 'hard'].map(level => {
-                        const l = level as Level;
-                        // Logic: Easy locks at L4. Medium unlocks L2. Hard unlocks L4.
-                        const isLocked = (l === 'easy' && userLevel >= 4) || (l === 'medium' && userLevel < 2) || (l === 'hard' && userLevel < 4);
+                    {/* Stats Card */}
+                    <div className="w-full p-6 flex flex-col gap-4 shadow-2xl">
+                      <div className="flex justify-between items-center border-b border-white/5 pb-4">
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Score</span>
+                        <span className="text-2xl font-black text-white italic">{score.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Progress</span>
+                        <span className="text-lg font-black text-white italic">{completion}%</span>
+                      </div>
+                      <div className="flex gap-2 mt-2">
+                        <div className="flex-1 bg-white/5 rounded-lg p-2 text-center">
+                          <span className="block text-xl font-black text-white">{sessionPerfects}<span className="text-yellow-500 text-sm">⭐</span></span>
+                          <span className="text-[9px] font-bold text-slate-500 uppercase">Gold (Perfects)</span>
+                        </div>
+                        <div className="flex-1 bg-white/5 rounded-lg p-2 text-center">
+                          <span className="block text-xl font-black text-white">{expEarned}<span className="text-blue-400 text-sm">XP</span></span>
+                          <span className="text-[9px] font-bold text-slate-500 uppercase">Growth</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="w-full space-y-3">
+                      {/* Revive Button */}
+                      {(() => {
+                        const goldCost = 50 * (reviveCount + 1);
+                        const canAffordRevive = userPerfects >= goldCost && globalShields >= 2;
 
                         return (
                           <button
-                            key={l}
-                            onClick={() => !isLocked && setSelectedLevel(l)}
-                            className={`flex-1 py-2 text-[10px] font-black uppercase rounded-md transition-all relative ${selectedLevel === l ? 'bg-[#312e81] text-white shadow-sm' : isLocked ? 'opacity-30 cursor-not-allowed text-zinc-600' : 'text-zinc-500 hover:text-zinc-300'}`}
+                            onClick={handleRevive}
+                            disabled={!canAffordRevive}
+                            className={`w-full py-4 rounded-full font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 transition-all
+                               ${canAffordRevive
+                                ? "bg-[#312e81] text-white hover:bg-[#312e81]/80 hover:scale-105 shadow-lg shadow-indigo-500/10"
+                                : "bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-50"
+                              }`}
                           >
-                            {l} {isLocked && <span className="absolute -top-1 -right-1 text-[8px]">🔒</span>}
+                            <span>Revive</span>
+                            <span className="text-[10px] bg-black/20 px-1.5 py-0.5 rounded font-bold">
+                              {goldCost}G + 2🛡️
+                            </span>
                           </button>
                         );
-                      })}
+                      })()}
+
+                      {/* Retry Button */}
+                      {(() => {
+                        const { canAfford, shieldCost } = checkCanAfford();
+                        return (
+                          <button
+                            onClick={canAfford ? restartSession : undefined}
+                            disabled={!canAfford}
+                            className={`w-full py-4 rounded-full font-black text-sm uppercase tracking-widest transition-all flex flex-col items-center justify-center leading-none gap-1
+                               ${canAfford
+                                ? "bg-white/10 text-white border border-white/10 hover:bg-white/20 hover:scale-105"
+                                : "bg-zinc-800 text-zinc-500 cursor-not-allowed"
+                              }`}
+                          >
+                            <span>Play Again</span>
+                            <span className="text-[9px] font-bold opacity-60">
+                              {canAfford ? `COST: 2❤️ ${shieldCost}🛡️` : "Low Energy"}
+                            </span>
+                          </button>
+                        );
+                      })()}
+
+                      <button
+                        onClick={handleClaimAwards}
+                        className="w-full py-4 text-xs font-bold text-slate-500 uppercase tracking-widest hover:text-white transition-colors"
+                      >
+                        Claim Rewards & Exit
+                      </button>
                     </div>
                   </div>
-
-                  {/* Play Button */}
-                  {(() => {
-                    const { canAfford } = checkCanAfford();
-                    return (
-                      <button
-                        onClick={canAfford ? startGame : undefined}
-                        className={`w-full py-4 rounded-full font-black text-sm uppercase tracking-widest transition-all transform active:scale-95 shadow-xl flex items-center justify-center gap-2
-                              ${canAfford ? 'bg-[#1ed760] text-black hover:bg-[#1fdf64] hover:scale-105' : 'bg-red-900/20 text-red-500 border border-red-500/20 cursor-not-allowed'}`}
-                      >
-                        {canAfford ? 'START' : 'INSUFFICIENT FUNDS'}
-                      </button>
-                    );
-                  })()}
-                </div>
-
-              </div>
-            </div>
-          )}
-
-          {/* Results/Overlays */}
-          {/* Pause Overlay - Spotify Style */}
-          {isPaused && !isGameOver && !isCleared && (
-            <div className="absolute inset-0 bg-[#0f172a]/90 backdrop-blur-2xl flex flex-col items-center justify-center z-[120]">
-              <div className="flex flex-col gap-6 items-center w-full max-w-xs">
-                <h2 className="text-4xl font-black text-white italic tracking-tighter uppercase mb-4">Paused</h2>
-
-                <button
-                  onClick={() => { setIsPaused(false); audioRef.current?.play(); }}
-                  className="w-full py-4 rounded-full bg-white text-black font-black text-sm uppercase tracking-widest hover:scale-105 transition-transform"
-                >
-                  Resume
-                </button>
-
-                <button
-                  onClick={restartSession}
-                  className="w-full py-4 rounded-full bg-transparent border border-white/20 text-white font-bold text-sm uppercase tracking-widest hover:bg-white/10 transition-colors"
-                >
-                  Restart
-                </button>
-
-                <button
-                  onClick={handleAbort}
-                  className="text-xs font-bold text-slate-500 uppercase tracking-widest hover:text-white transition-colors mt-4"
-                >
-                  Quit Game
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Game Over Screen - Spotify Style */}
-          {isGameOver && (
-            <div className="absolute inset-0 bg-[#111827]/95 backdrop-blur-3xl flex flex-col items-center justify-center p-6 z-[120] animate-in fade-in duration-300">
-              {/* Album Art Blur Background */}
-              {currentSong?.coverArt && (
-                <div className="absolute inset-0 opacity-20 blur-3xl scale-125 pointer-events-none">
-                  <img src={currentSong.coverArt} className="w-full h-full object-cover grayscale" />
                 </div>
               )}
 
-              <div className="max-w-sm w-full relative z-10 flex flex-col items-center gap-6">
-                <h3 className="text-5xl font-black italic text-white uppercase tracking-tighter drop-shadow-xl">Game Over</h3>
-
-                {/* Song Info */}
-                <div className="text-center">
-
-                  <h4 className="text-xl font-black text-white italic truncate max-w-[250px]">{currentSong?.fileName.replace(/\.[^/.]+$/, "")}</h4>
-                </div>
-
-                {/* Stats Card */}
-                <div className="w-full p-6 flex flex-col gap-4 shadow-2xl">
-                  <div className="flex justify-between items-center border-b border-white/5 pb-4">
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Score</span>
-                    <span className="text-2xl font-black text-white italic">{score.toLocaleString()}</span>
+              {/* Success Screen - Spotify Style */}
+              {isCleared && (
+                <div className="absolute inset-0 bg-[#1e1b4b]/95 backdrop-blur-3xl flex flex-col items-center justify-center p-6 z-[130] animate-in fade-in duration-300">
+                  {/* Confetti / Glow */}
+                  <div className="absolute inset-0 overflow-hidden pointer-events-none">
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-green-500/10 rounded-full blur-[80px]"></div>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Progress</span>
-                    <span className="text-lg font-black text-white italic">{completion}%</span>
-                  </div>
-                  <div className="flex gap-2 mt-2">
-                    <div className="flex-1 bg-white/5 rounded-lg p-2 text-center">
-                      <span className="block text-xl font-black text-white">{sessionPerfects}<span className="text-yellow-500 text-sm">⭐</span></span>
-                      <span className="text-[9px] font-bold text-slate-500 uppercase">Gold (Perfects)</span>
+
+                  <div className="max-w-sm w-full relative z-10 flex flex-col items-center gap-6">
+                    {/* Stars */}
+                    <div className="flex gap-2">
+                      <StarIcon active={true} className="w-8 h-8 text-yellow-400 drop-shadow-[0_0_10px_rgba(250,204,21,0.5)] animate-[bounce_1s_infinite]" />
+                      <StarIcon active={true} className="w-10 h-10 text-yellow-400 drop-shadow-[0_0_15px_rgba(250,204,21,0.6)] -translate-y-2 animate-[bounce_1.2s_infinite]" />
+                      <StarIcon active={true} className="w-8 h-8 text-yellow-400 drop-shadow-[0_0_10px_rgba(250,204,21,0.5)] animate-[bounce_0.8s_infinite]" />
                     </div>
-                    <div className="flex-1 bg-white/5 rounded-lg p-2 text-center">
-                      <span className="block text-xl font-black text-white">{expEarned}<span className="text-blue-400 text-sm">XP</span></span>
-                      <span className="text-[9px] font-bold text-slate-500 uppercase">Growth</span>
+
+                    <h3 className="text-5xl font-black italic text-white uppercase tracking-tighter drop-shadow-xl animate-in zoom-in-0 duration-500">Complete</h3>
+
+                    {/* Song Info */}
+                    <div className="text-center">
+                      <p className="text-sm font-bold text-green-400 uppercase tracking-widest mb-1">Perfect Performance</p>
+                      <h4 className="text-xl font-black text-white italic truncate max-w-[250px]">{currentSong?.fileName.replace(/\.[^/.]+$/, "")}</h4>
                     </div>
+
+                    {/* Stats Card */}
+                    <div className="w-full border border-white/5 rounded-2xl p-6 flex flex-col gap-4 shadow-2xl">
+                      {/* Rewards Row */}
+                      <div className="flex justify-between items-center border-b border-white/5 pb-4">
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Rewards</span>
+                        <div className="flex items-center gap-3">
+                          <span className="text-xl font-black text-white">+{sessionPerfects}<span className="text-yellow-500 text-base ml-0.5">Gold</span></span>
+                          {(completion >= 50) && (
+                            <span className="text-xl font-black text-yellow-400">+{completion >= 100 ? 10 : 5}⭐</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Level Progress */}
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-end">
+                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Level {Math.floor((currentExp + animatedExp) / 10000) + 1}</span>
+                          <span className="text-[10px] font-bold text-blue-400">+{animatedExp} XP</span>
+                        </div>
+                        <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden relative">
+                          <div className="absolute top-0 left-0 h-full bg-blue-500 transition-all duration-1000 ease-out" style={{ width: `${((currentExp + animatedExp) % 10000) / 100}%` }}></div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Main Action */}
+                    <button
+                      onClick={handleClaimAwards}
+                      className="w-full py-4 rounded-full bg-[#312e81] text-white font-black text-sm uppercase tracking-widest hover:bg-[#312e81]/80 hover:scale-105 transition-all shadow-[0_0_20px_rgba(49,46,129,0.3)]"
+                    >
+                      Claim Rewards
+                    </button>
                   </div>
                 </div>
-
-                {/* Actions */}
-                <div className="w-full space-y-3">
-                  {/* Revive Button */}
-                  {(() => {
-                    const goldCost = 50 * (reviveCount + 1);
-                    const canAffordRevive = userPerfects >= goldCost && globalShields >= 2;
-
-                    return (
-                      <button
-                        onClick={handleRevive}
-                        disabled={!canAffordRevive}
-                        className={`w-full py-4 rounded-full font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 transition-all
-                           ${canAffordRevive
-                            ? "bg-[#312e81] text-white hover:bg-[#312e81]/80 hover:scale-105 shadow-lg shadow-indigo-500/10"
-                            : "bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-50"
-                          }`}
-                      >
-                        <span>Revive</span>
-                        <span className="text-[10px] bg-black/20 px-1.5 py-0.5 rounded font-bold">
-                          {goldCost}G + 2🛡️
-                        </span>
-                      </button>
-                    );
-                  })()}
-
-                  {/* Retry Button */}
-                  {(() => {
-                    const { canAfford, shieldCost } = checkCanAfford();
-                    return (
-                      <button
-                        onClick={canAfford ? restartSession : undefined}
-                        disabled={!canAfford}
-                        className={`w-full py-4 rounded-full font-black text-sm uppercase tracking-widest transition-all flex flex-col items-center justify-center leading-none gap-1
-                           ${canAfford
-                            ? "bg-white/10 text-white border border-white/10 hover:bg-white/20 hover:scale-105"
-                            : "bg-zinc-800 text-zinc-500 cursor-not-allowed"
-                          }`}
-                      >
-                        <span>Retry Sync</span>
-                        <span className="text-[9px] font-bold opacity-60">
-                          {canAfford ? `COST: 2❤️ ${shieldCost}🛡️` : "Low Energy"}
-                        </span>
-                      </button>
-                    );
-                  })()}
-
-                  <button
-                    onClick={handleClaimAwards}
-                    className="w-full py-4 text-xs font-bold text-slate-500 uppercase tracking-widest hover:text-white transition-colors"
-                  >
-                    Claim Rewards & Exit
-                  </button>
-                </div>
-              </div>
+              )}
             </div>
-          )}
 
-          {/* Success Screen - Spotify Style */}
-          {isCleared && (
-            <div className="absolute inset-0 bg-[#1e1b4b]/95 backdrop-blur-3xl flex flex-col items-center justify-center p-6 z-[130] animate-in fade-in duration-300">
-              {/* Confetti / Glow */}
-              <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-green-500/10 rounded-full blur-[80px]"></div>
-              </div>
+            {/* Game Drawer Layer (Top) */}
+            <div className={`absolute inset-0 z-10 transition-transform duration-700 cubic-bezier(0.4, 0, 0.2, 1) overflow-hidden rounded-2xl ${(isPaused || isGameOver || isCleared) ? 'translate-y-[100%]' : 'translate-y-0'}`}>
 
-              <div className="max-w-sm w-full relative z-10 flex flex-col items-center gap-6">
-                {/* Stars */}
-                <div className="flex gap-2">
-                  <StarIcon active={true} className="w-8 h-8 text-yellow-400 drop-shadow-[0_0_10px_rgba(250,204,21,0.5)] animate-[bounce_1s_infinite]" />
-                  <StarIcon active={true} className="w-10 h-10 text-yellow-400 drop-shadow-[0_0_15px_rgba(250,204,21,0.6)] -translate-y-2 animate-[bounce_1.2s_infinite]" />
-                  <StarIcon active={true} className="w-8 h-8 text-yellow-400 drop-shadow-[0_0_10px_rgba(250,204,21,0.5)] animate-[bounce_0.8s_infinite]" />
+              {/* Gradient transition matching HUD */}
+              <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-[#0f172a] to-transparent z-[5] pointer-events-none" />
+
+              {/* Drawer Handle Visual */}
+              {(isPaused || isGameOver || isCleared) && (
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-white/20 rounded-full mt-2 z-20" />
+              )}
+
+              <canvas ref={canvasRef} width={450} height={800} className="w-full h-full" />
+
+              {/* Combo Display (floating on drawer) */}
+              {combo > 1 && (
+                <div className="absolute top-8 right-4 flex flex-col items-end animate-in zoom-in-50 slide-in-from-right-8 fade-in duration-200 pointer-events-none">
+                  <span className="text-5xl font-black text-white italic leading-none drop-shadow-[0_0_15px_rgba(255,255,255,0.3)] tracking-tighter">{combo}</span>
+                  <span className="text-[8px] font-black text-white/50 uppercase tracking-[0.3em]">COMBO</span>
                 </div>
+              )}
 
-                <h3 className="text-5xl font-black italic text-white uppercase tracking-tighter drop-shadow-xl animate-in zoom-in-0 duration-500">Sync Complete</h3>
+              {/* Start Overlay - Always on Drawer */}
+              {!isActive && !isCleared && !isGameOver && (
+                <div className="absolute inset-0 bg-[#0f172a]/95 backdrop-blur-3xl flex flex-col items-center z-[110] rounded-2xl">
+                  {/* Blurred Background Art */}
+                  {currentSong?.coverArt && (
+                    <div className="absolute inset-0 opacity-30 blur-3xl scale-125 pointer-events-none">
+                      <img src={currentSong.coverArt} className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-gradient-to-b from-[#0f172a]/50 via-[#0f172a]/80 to-[#0f172a]"></div>
+                    </div>
+                  )}
 
-                {/* Song Info */}
-                <div className="text-center">
-                  <p className="text-sm font-bold text-green-400 uppercase tracking-widest mb-1">Perfect Synchronization</p>
-                  <h4 className="text-xl font-black text-white italic truncate max-w-[250px]">{currentSong?.fileName.replace(/\.[^/.]+$/, "")}</h4>
-                </div>
+                  {/* Top Bar (Abort & Resources) */}
+                  <div className="w-full p-6 flex justify-between items-center relative z-20">
+                    <button onClick={handleAbort} className="w-10 h-10 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center text-white hover:bg-white/10 transition-all">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
 
-                {/* Stats Card */}
-                <div className="w-full bg-[#181818] border border-white/5 rounded-2xl p-6 flex flex-col gap-4 shadow-2xl">
-                  {/* Rewards Row */}
-                  <div className="flex justify-between items-center border-b border-white/5 pb-4">
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Rewards</span>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xl font-black text-white">+{sessionHearts + 1}<span className="text-red-500 text-base ml-0.5">❤️</span></span>
-                      {(completion >= 50) && (
-                        <span className="text-xl font-black text-yellow-400">+{completion >= 100 ? 10 : 5}⭐</span>
-                      )}
+                    <div className="flex items-center gap-2 bg-black/40 backdrop-blur-md px-4 py-2 rounded-full border border-white/5">
+                      <span className="text-xs font-bold text-white flex items-center gap-1">{globalHearts}<span className="text-red-500 text-[10px]">❤️</span></span>
+                      <div className="w-px h-3 bg-white/10"></div>
+                      <span className="text-xs font-bold text-white flex items-center gap-1">{globalShields}<span className="text-blue-500 text-[10px]">🛡️</span></span>
                     </div>
                   </div>
 
-                  {/* Level Progress */}
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-end">
-                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Level {Math.floor((currentExp + animatedExp) / 10000) + 1}</span>
-                      <span className="text-[10px] font-bold text-blue-400">+{animatedExp} XP</span>
+                  {/* Main Content */}
+                  <div className="flex-1 w-full flex flex-col items-center justify-center relative z-20 px-6 sm:px-8 py-8 sm:pb-12 gap-6 sm:gap-8">
+
+                    {/* Album Art & Title */}
+                    <div className="flex flex-col items-center gap-4 text-center">
+                      <div className="w-32 h-32 sm:w-48 sm:h-48 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden border border-white/10 relative group">
+                        {currentSong?.coverArt ? (
+                          <img src={currentSong.coverArt} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
+                        ) : (
+                          <div className="w-full h-full bg-zinc-800 flex items-center justify-center"><span className="text-4xl">🎵</span></div>
+                        )}
+                      </div>
+                      <div>
+                        <h2 className="text-xl sm:text-2xl font-black text-white italic tracking-tighter leading-tight drop-shadow-lg max-w-[280px] sm:max-w-[300px] mx-auto truncate">
+                          {currentSong?.fileName.replace(/\.[^/.]+$/, "")}
+                        </h2>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Ready to Play</p>
+                      </div>
                     </div>
-                    <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden relative">
-                      <div className="absolute top-0 left-0 h-full bg-blue-500 transition-all duration-1000 ease-out" style={{ width: `${((currentExp + animatedExp) % 10000) / 100}%` }}></div>
+
+                    {/* Settings Container */}
+                    <div className="w-full max-w-xs space-y-4 sm:space-y-6">
+
+                      {/* Selectors */}
+                      <div className="flex flex-col gap-3 sm:gap-4">
+                        <div className="w-full bg-[#1e1b4b]/40 backdrop-blur-md border border-white/5 rounded-2xl p-4 sm:p-6 flex flex-row gap-2 shadow-2xl">
+                          {['classic', 'endless'].map(m => (
+                            <button
+                              key={m}
+                              onClick={() => setSelectedMode(m as any)}
+                              className={`flex-1 py-2 text-[10px] font-black uppercase rounded-md transition-all ${selectedMode === m ? 'bg-[#312e81] text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+                            >
+                              {m}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="w-full bg-[#1e1b4b]/40 backdrop-blur-md border border-white/5 rounded-2xl p-4 sm:p-6 flex flex-row gap-2 shadow-2xl">
+                          {['easy', 'medium', 'hard'].map(level => {
+                            const l = level as Level;
+                            // Logic: Easy locks at L4. Medium unlocks L2. Hard unlocks L4.
+                            const isLocked = (l === 'easy' && userLevel >= 4) || (l === 'medium' && userLevel < 2) || (l === 'hard' && userLevel < 4);
+
+                            return (
+                              <button
+                                key={l}
+                                onClick={() => !isLocked && setSelectedLevel(l)}
+                                className={`flex-1 py-2 text-[10px] font-black uppercase rounded-md transition-all relative ${selectedLevel === l ? 'bg-[#312e81] text-white shadow-sm' : isLocked ? 'opacity-30 cursor-not-allowed text-zinc-600' : 'text-zinc-500 hover:text-zinc-300'}`}
+                              >
+                                {l} {isLocked && <span className="absolute -top-1 -right-1 text-[8px]">🔒</span>}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Play Button */}
+                      {(() => {
+                        const { canAfford } = checkCanAfford();
+                        return (
+                          <button
+                            onClick={canAfford ? startGame : undefined}
+                            className={`w-full py-4 rounded-full font-black text-sm uppercase tracking-widest transition-all transform active:scale-95 shadow-xl flex items-center justify-center gap-2
+                                  ${canAfford ? 'bg-[#1ed760] text-black hover:bg-[#1fdf64] hover:scale-105' : 'bg-red-900/20 text-red-500 border border-red-500/20 cursor-not-allowed'}`}
+                          >
+                            {canAfford ? 'START' : 'INSUFFICIENT FUNDS'}
+                          </button>
+                        );
+                      })()}
                     </div>
+
                   </div>
                 </div>
-
-                {/* Main Action */}
-                <button
-                  onClick={handleClaimAwards}
-                  className="w-full py-4 rounded-full bg-[#312e81] text-white font-black text-sm uppercase tracking-widest hover:bg-[#312e81]/80 hover:scale-105 transition-all shadow-[0_0_20px_rgba(49,46,129,0.3)]"
-                >
-                  Claim Rewards
-                </button>
-              </div>
+              )}
             </div>
-          )}
+          </div>
 
         </div >
 

@@ -340,7 +340,13 @@ const App: React.FC = () => {
     // With IndexedDB, fileUrl is regenerated and valid
     if (!item.fileUrl) return alert("Error loading track. Please re-upload.");
 
-    // Update lastPlayed timestamp
+    setGameMode(mode);
+    setCurrentPlaylist([item]);
+    setScreen('game');
+  };
+
+  const handleStartPlay = (item: AudioAnalysis) => {
+    // Update lastPlayed timestamp ONLY when the game actually starts
     const now = Date.now();
     storageService.updateTrackStats(item.id, { lastPlayed: now });
     setHistory(prev => {
@@ -355,10 +361,6 @@ const App: React.FC = () => {
         return (b.timestamp || 0) - (a.timestamp || 0);
       });
     });
-
-    setGameMode(mode);
-    setCurrentPlaylist([item]);
-    setScreen('game');
   };
 
   const handleDeleteTrack = async (id: string) => {
@@ -548,19 +550,8 @@ const App: React.FC = () => {
           <div className="h-full container mx-auto p-2 overflow-y-auto no-scrollbar relative">
             <div className="max-w-5xl mx-auto space-y-0 relative z-10">
               {/* Hero Section */}
-              <section className="flex flex-col md:flex-row gap-0 items-end p-0 bg-gradient-to-b from-transparent to-black/20 rounded-none">
-                {/* Hero Art */}
-                {history.length > 0 && (
-                  <div className="w-full md:w-56 md:h-56 aspect-square shrink-0 shadow-[0_20px_50px_rgba(0,0,0,0.5)] rounded-lg overflow-hidden relative group">
-                    {history[0].coverArt ? (
-                      <img src={history[0].coverArt} alt="Hero Cover" className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full bg-zinc-800 flex items-center justify-center">
-                        <span className="text-4xl">🎵</span>
-                      </div>
-                    )}
-                  </div>
-                )}
+              <section className="flex items-center gap-6 p-4 md:p-6 bg-gradient-to-b from-black/40 to-transparent rounded-3xl mb-8">
+
 
                 {/* Hero Info */}
                 <div className="flex flex-col gap-4 w-full overflow-hidden mt-2">
@@ -569,6 +560,7 @@ const App: React.FC = () => {
                       {history[0].fileName.replace(/\.[^/.]+$/, "")}
                     </h1>
                   )}
+
 
                   {/* Metadata Row */}
                   <div className="flex items-center gap-2 text-sm font-bold text-white/80 overflow-hidden whitespace-nowrap">
@@ -715,6 +707,7 @@ const App: React.FC = () => {
               userLevel={user.level}
               currentExp={user.exp}
               initialMode={gameMode}
+              onStartPlay={handleStartPlay}
             />
           )
         }
