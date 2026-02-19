@@ -73,7 +73,6 @@ interface BeatGameProps {
   userPerfects: number;
   onUseCurrency: (hearts: number, shields: number, gold?: number) => void;
   onFinish: (sessionHearts: number, sessionShields: number, sessionPerfects: number, difficulty: Level, completion: number) => void;
-  userLevel: number;
   currentExp: number;
   initialMode?: GameMode;
   onStartPlay?: (track: AudioAnalysis) => void;
@@ -104,7 +103,7 @@ const StarIcon = ({ active, className }: { active: boolean; className?: string }
 );
 
 export const BeatGame: React.FC<BeatGameProps> = ({
-  playlist, allSongs, onExit, globalHearts, globalShields, userPerfects, onUseCurrency, onFinish, userLevel, currentExp, initialMode, onStartPlay
+  playlist, allSongs, onExit, globalHearts, globalShields, userPerfects, onUseCurrency, onFinish, currentExp, initialMode, onStartPlay
 }) => {
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
   const [selectedMode, setSelectedMode] = useState<GameMode>(initialMode || (playlist.length > 1 ? 'endless' : 'classic'));

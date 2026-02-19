@@ -979,7 +979,6 @@ const App: React.FC = () => {
               userPerfects={user.perfects || 0}
               onUseCurrency={handleUseCurrency}
               onFinish={handleGameFinish}
-              userLevel={user.level}
               currentExp={user.exp}
               initialMode={gameMode}
               onStartPlay={handleStartPlay}
