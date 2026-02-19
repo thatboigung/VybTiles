@@ -11,7 +11,9 @@ interface SettingsProps {
   onUpgrade: () => void;
 }
 
-export const Settings: React.FC<SettingsProps> = ({ onBack, user, onUpdateProfile, onLogout, onUpgrade }) => {
+export const Settings: React.FC<SettingsProps> = ({
+  onBack, user, onUpdateProfile, onLogout, onUpgrade
+}) => {
   const [isEditing, setIsEditing] = useState(false);
   const [tempName, setTempName] = useState(user.username);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -131,6 +133,7 @@ export const Settings: React.FC<SettingsProps> = ({ onBack, user, onUpdateProfil
             )}
           </div>
 
+
           {/* Analytics Section */}
           <div className="bg-white/5 border border-white/10 p-8 rounded-[1rem] space-y-6">
             <h3 className="text-lg font-black uppercase tracking-widest italic text-white flex items-center gap-3">
@@ -207,6 +210,6 @@ export const Settings: React.FC<SettingsProps> = ({ onBack, user, onUpdateProfil
       </div>
 
       <ShareModal isOpen={showShareModal} onClose={() => setShowShareModal(false)} />
-    </div>
+    </div >
   );
 };

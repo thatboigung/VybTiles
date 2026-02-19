@@ -34,16 +34,3 @@ export interface UserStats {
 
 export type GameMode = 'classic' | 'endless';
 export type Level = 'easy' | 'medium' | 'hard';
-
-export interface YouTubeResult {
-  videoId: string;
-  title: string;
-  author: string;
-  duration: number; // in seconds
-  videoThumbnails: Array<{
-    quality: string;
-    url: string;
-    width: number;
-    height: number;
-  }>;
-}
