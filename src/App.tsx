@@ -68,6 +68,20 @@ const LogoutConfirmModal: React.FC<{ isOpen: boolean; onClose: () => void; onCon
   );
 };
 
+const LoadingScreen: React.FC = () => (
+  <div className="fixed inset-0 z-[100] bg-[#0f172a] flex flex-col items-center justify-center">
+    <div className="flex flex-col items-center animate-pulse">
+      <h1 className="text-4xl font-black italic text-white mb-4 tracking-tighter">VYB TAPS</h1>
+      <div className="flex items-center gap-2">
+        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+        <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+        <div className="w-2 h-2 bg-pink-500 rounded-full animate-bounce"></div>
+      </div>
+      <p className="mt-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Fetching Resources...</p>
+    </div>
+  </div>
+);
+
 const App: React.FC = () => {
   const [currentPlaylist, setCurrentPlaylist] = useState<AudioAnalysis[] | null>(null);
   const [history, setHistory] = useState<AudioAnalysis[]>([]);
@@ -77,6 +91,7 @@ const App: React.FC = () => {
   const [gameMode, setGameMode] = useState<GameMode>('classic');
   const [screen, setScreen] = useState<'landing' | 'collection' | 'game' | 'settings' | 'help'>('landing');
   const [activeTab, setActiveTab] = useState<'local' | 'online'>('local');
+  const [isLoading, setIsLoading] = useState(true);
 
   const globalAudioRef = useRef<HTMLAudioElement>(null);
 
@@ -154,9 +169,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const checkSetup = () => {
       const isComplete = localStorage.getItem(STORAGE_KEYS.SETUP_COMPLETE);
-      if (isComplete === 'true' && user.username) {
-        setScreen('collection');
-      }
+      return isComplete === 'true' && user.username;
     };
 
     const loadHistory = async () => {
@@ -164,15 +177,29 @@ const App: React.FC = () => {
         const tracks = await storageService.getAllTracks();
         if (tracks.length > 0) {
           setHistory(tracks);
-          if (!currentPlaylist) setCurrentPlaylist([tracks[0]]); // Set initial playlist if empty
+          if (!currentPlaylist) setCurrentPlaylist([tracks[0]]);
         }
       } catch (e) {
         console.error("Failed to load history from DB", e);
       }
     };
 
-    checkSetup();
-    loadHistory();
+    const initApp = async () => {
+      // Simulate minimum loading time for smooth UX
+      const minLoadTime = new Promise(resolve => setTimeout(resolve, 1500));
+
+      const check = checkSetup();
+      const load = loadHistory();
+
+      await Promise.all([minLoadTime, load]);
+
+      if (check) {
+        setScreen('collection');
+      }
+      setIsLoading(false);
+    };
+
+    initApp();
   }, [user.username]);
 
   useEffect(() => {
@@ -503,6 +530,10 @@ const App: React.FC = () => {
 
 
 
+
+  if (isLoading) {
+    return <LoadingScreen />;
+  }
 
   if (screen === 'landing') {
     return <>
