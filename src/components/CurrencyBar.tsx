@@ -121,7 +121,7 @@ export const CurrencyBar: React.FC<CurrencyBarProps> = ({
                             className="w-full p-3 bg-white text-black rounded-2xl font-black uppercase text-xs hover:scale-[1.02] active:scale-95 transition-all shadow-lg flex items-center justify-between group"
                         >
                             <div className="flex flex-col text-left">
-                                <span className="text-[7px] font-black uppercase tracking-widest opacity-40">Protocol Exchange</span>
+                                <span className="text-[7px] font-black uppercase tracking-widest opacity-40">Trade Resources</span>
                                 <span className="text-[10px]">Gold ➜ Stars</span>
                             </div>
                             <svg className="w-4 h-4 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">

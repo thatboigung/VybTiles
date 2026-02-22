@@ -6,14 +6,9 @@ const LANES = 4;
 const TARGET_Y_RATIO = 0.8;
 
 const BG_PALETTE = [
-  '#1e1b4b', // Royal Indigo (Focus Base)
-  '#4f46e5', // Electric Indigo (Momentum)
-  '#7c3aed', // Deep Violet (Flow State)
-  '#c026d3', // Cosmic Magenta (Dopamine Pop)
-  '#0891b2', // Cyber Cyan (High Contrast)
+  '#1e1b4b', // Royal Indigo (Focus Base
+
   '#111827', // Obsidian (Immersion Depth)
-  '#2e1065', // Midnight Purple (Emotional Depth)
-  '#ec4899'  // Cyber Pink (Pure Energy)
 ];
 
 const BG_INTERVALS = [10, 20, 15, 23];
@@ -37,7 +32,7 @@ const TutorialModal: React.FC<{ mode: string; isOpen: boolean; onClose: () => vo
   return (
     <div className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-md flex items-center justify-center p-6 text-center">
       <div className="max-w-md w-full bg-zinc-950 border border-white/10 p-8 rounded-3xl shadow-2xl">
-        <h2 className="text-3xl font-black italic text-white uppercase mb-6 tracking-tighter">Protocol: {mode.toUpperCase()}</h2>
+        <h2 className="text-3xl font-black italic text-white uppercase mb-6 tracking-tighter">How to Play: {mode.toUpperCase()}</h2>
         <div className="space-y-4 text-slate-400 text-sm leading-relaxed mb-8">
           <div className="space-y-3">
             <p className="text-white font-bold text-base underline underline-offset-4">Core Rules:</p>
@@ -89,6 +84,7 @@ interface Note {
   duration?: number; // New: Duration of the long tile in seconds
   holdProgress?: number; // New: 0 to 1 progress of the hold
   isFullyHeld?: boolean; // New: Did the user hold it to the end
+  wiggleSpeed?: number; // New: Speed of wiggle (0.5 or 1.0)
 }
 
 interface Particle {
@@ -140,8 +136,9 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   const [invincible, setInvincible] = useState(false);
   const [expEarned, setExpEarned] = useState(0);
   const [animatedExp, setAnimatedExp] = useState(0);
-  const [feedback, setFeedback] = useState<{ text: string; color: string; scale: number } | null>(null);
+  const [feedback, setFeedback] = useState<{ text: string; color: string; scale: number; rotation: number } | null>(null);
   const [resumeCountdown, setResumeCountdown] = useState<number | null>(null);
+  const [ultraFocus, setUltraFocus] = useState(true);
 
   // Shuffle queue for endless mode
   const [shuffleQueue, setShuffleQueue] = useState<AudioAnalysis[]>([]);
@@ -260,7 +257,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   };
 
   const showFeedback = (text: string, color: string, scale: number) => {
-    setFeedback({ text, color, scale });
+    setFeedback({ text, color, scale, rotation: Math.random() * 12 - 6 });
     // Clear feedback after 600ms (shorter for snappier feel)
     setTimeout(() => setFeedback(null), 600);
   };
@@ -470,16 +467,19 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
       // Varying Tiles Logic (Moving Tiles)
       let isMoving = false;
-      if (type === 'tile' && (selectedLevel === 'medium' || selectedLevel === 'hard')) {
-        isMoving = Math.random() < 0.25;
+      if (type === 'tile') {
+        const moveChance = ultraFocus ? 0.5 : 0.25;
+        if (selectedLevel === 'medium' || selectedLevel === 'hard' || ultraFocus) {
+          isMoving = Math.random() < moveChance;
+        }
       }
 
       // Long Tiles Logic
       let isLong = false;
       let duration = 0;
-      if (type === 'tile' && !isMoving && Math.random() < 0.15) {
+      if (type === 'tile' && !isMoving && Math.random() < 0.18) { // Slightly more frequent
         isLong = true;
-        duration = 0.4 + Math.random() * 0.8;
+        duration = 0.6 + Math.random() * 1.2; // Increased duration (0.6s - 1.8s)
         excludeUntil = beatTime + duration + 0.2;
       }
 
@@ -516,7 +516,8 @@ export const BeatGame: React.FC<BeatGameProps> = ({
         originalLane: lane1,
         isLong,
         duration,
-        holdProgress: 0
+        holdProgress: 0,
+        wiggleSpeed: Math.random() < 0.5 ? 0.5 : 1.0
       }];
 
       // Skip double tiles if it's a long tile
@@ -890,7 +891,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
       // Overlay shifting color with semi-transparency
       if (coverArtElement) {
-        ctx.globalAlpha = 0.82; // Balance immersion and readability
+        ctx.globalAlpha = 0.50; // Increased background visibility
       }
       ctx.fillStyle = activeBgColor;
       ctx.fillRect(0, 0, w, h);
@@ -980,7 +981,8 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
           // Stop moving if we are past the middle of the screen (0.5 * h)
           // This gives the user time to react
-          if (yPos < h * 0.5) {
+          // NEW: Only switch lanes if ultraFocus is enabled
+          if (ultraFocus && yPos < h * 0.5) {
             const switchState = Math.floor(displayTime / switchPeriod) % 2;
 
             const targetLane = switchState === 0
@@ -1036,9 +1038,15 @@ export const BeatGame: React.FC<BeatGameProps> = ({
           if (note.isLong && note.duration) {
             const tailHeight = note.duration * speed;
             const isHeld = holdingNotesRef.current.has(note.id);
+            const hitAge = now - laneHits[note.lane];
+            const popScale = hitAge < 200 ? 1 + (0.2 * (1 - hitAge / 200)) : 1;
 
-            // Calculate how much of the tail is "burned" (passed targetY)
-            // If hit, we use displayTime - note.time to see progress
+            // Beat-synced Wiggle Logic
+            const wiggleIntensity = isHeld ? (4 + (note.holdProgress || 0) * 8) : 0;
+            const currentWiggleSpeed = note.wiggleSpeed || 1.0;
+            const wiggleOffset = isHeld ? Math.sin(now / (40 / currentWiggleSpeed)) * wiggleIntensity : 0;
+            const renderX = x + wiggleOffset;
+
             let burntHeight = 0;
             if (note.hit) {
               const holdTime = Math.max(0, displayTime - note.time);
@@ -1050,55 +1058,67 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                 note.isFullyHeld = true;
                 holdingNotesRef.current.delete(note.id);
                 setScore(s => s + 500); // Completion bonus
-                spawnParticles(x, targetY, '#facc15', 30);
+                spawnParticles(renderX, targetY, '#22d3ee', 40); // Cyan splash
+                showFeedback('VIBE!', 'text-cyan-400', 1.8); // High impact Vibe
               }
 
-              // Bonus points while holding
               if (isHeld) {
                 setScore(s => s + 10);
-                // Continuous particles at target line
-                if (Math.random() < 0.3) {
-                  spawnParticles(x, targetY, '#fff', 5);
+                if (Math.random() < 0.4) {
+                  spawnParticles(renderX, targetY, '#fff', 5);
                 }
               }
             }
 
             ctx.save();
             const tailY = y - tailHeight;
+            const tailWidth = nW * 0.45 * popScale;
 
-            // Draw shadow/glow for the tail if being held
-            if (isHeld) {
-              ctx.shadowBlur = 20;
-              ctx.shadowColor = 'rgba(255, 255, 255, 0.5)';
-            }
-
-            // Tail Gradient
-            const tailGrad = ctx.createLinearGradient(x, y - burntHeight, x, tailY);
-            if (isHeld) {
-              tailGrad.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
-              tailGrad.addColorStop(1, 'rgba(255, 255, 255, 0.2)');
-            } else {
-              tailGrad.addColorStop(0, 'rgba(255, 255, 255, 0.4)');
-              tailGrad.addColorStop(1, 'rgba(255, 255, 255, 0.1)');
-            }
-
-            ctx.fillStyle = tailGrad;
-            // Draw tail from the top of the tile (y - nH/2) upwards
-            // But if hit, it should start from targetY (or y - burntHeight)
-            const tailStart = y - nH / 2;
-            const drawTop = tailY;
-            const drawBottom = tailStart - burntHeight;
-
-            if (drawBottom > drawTop) {
-              ctx.beginPath();
-              ctx.roundRect(x - (nW * 0.4) / 2, drawTop, nW * 0.4, drawBottom - drawTop, 4);
-              ctx.fill();
-            }
-
-            // Draw "End Cap" for long tiles
-            ctx.fillStyle = isHeld ? '#fff' : 'rgba(255,255,255,0.5)';
+            // 1. Draw Tail Container (Dark "Empty" part)
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
             ctx.beginPath();
-            ctx.roundRect(x - (nW * 0.6) / 2, tailY - 10, nW * 0.6, 20, 10);
+            ctx.roundRect(renderX - tailWidth / 2, tailY, tailWidth, tailHeight, 4);
+            ctx.fill();
+
+            // 2. Draw Tail Outline
+            ctx.strokeStyle = isHeld ? 'rgba(34, 211, 238, 0.5)' : 'rgba(255, 255, 255, 0.1)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // 3. Draw Vibe Fill (The "Vyb")
+            if (note.hit) {
+              const fillHeight = burntHeight;
+              ctx.save();
+              ctx.beginPath();
+              // Clip to the container shape
+              ctx.roundRect(renderX - tailWidth / 2, tailY, tailWidth, tailHeight, 4);
+              ctx.clip();
+
+              // Fill from the bottom (targetY) upwards
+              const fillGrad = ctx.createLinearGradient(renderX, y, renderX, y - fillHeight);
+              fillGrad.addColorStop(0, '#0ea5e9'); // Blue
+              fillGrad.addColorStop(1, '#22d3ee'); // Cyan
+
+              ctx.fillStyle = fillGrad;
+              ctx.fillRect(renderX - tailWidth / 2, y - fillHeight, tailWidth, fillHeight);
+
+              // 4. Energy Pulse (At the top of the fill level)
+              if (isHeld && note.holdProgress < 1) {
+                const pulseSize = 10 + Math.sin(now / 50) * 5;
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = '#22d3ee';
+                ctx.fillStyle = '#fff';
+                ctx.beginPath();
+                ctx.roundRect(renderX - (tailWidth * 1.2) / 2, y - fillHeight - 2, tailWidth * 1.2, 4, 2);
+                ctx.fill();
+              }
+              ctx.restore();
+            }
+
+            // 5. Draw "End Cap"
+            ctx.fillStyle = isHeld ? '#fff' : 'rgba(255,255,255,0.4)';
+            ctx.beginPath();
+            ctx.roundRect(renderX - (nW * 0.6 * popScale) / 2, tailY - 10, nW * 0.6 * popScale, 20 * popScale, 10);
             ctx.fill();
 
             ctx.restore();
@@ -1118,40 +1138,69 @@ export const BeatGame: React.FC<BeatGameProps> = ({
           ctx.roundRect(x - nW / 2, y - nH / 2, nW, nH, 4);
           if (isFailing && note.id === failedNoteId) {
             ctx.fill(); // Already set style above
-          } else if (note.type === 'powerup') {
-            // Background refinement
+          } else if (note.type === 'tile' || note.type === 'powerup') {
+            const depth = 12;
+            const xOffset = x - nW / 2;
+            const yOffset = y - nH / 2;
+            const cornerRadius = 12; // More rounded for "block" feel
+
+            // 1. Draw 3D Depth (Bottom Edge Shadow)
+            ctx.save();
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+            ctx.beginPath();
+            ctx.roundRect(xOffset, yOffset + depth, nW, nH, cornerRadius);
+            ctx.fill();
+            ctx.restore();
+
+            // 2. Draw Main Tile Face
+            ctx.save();
+            ctx.beginPath();
+            ctx.roundRect(xOffset, yOffset, nW, nH, cornerRadius);
+            ctx.clip();
+
             if (coverArtElement) {
-              ctx.save();
-              ctx.clip(); // Clip to the roundRect path defined above
-              ctx.drawImage(coverArtElement, x - nW / 2, y - nH / 2, nW, nH);
-              // Slight darkening overlay for better icon contrast
-              ctx.fillStyle = 'rgba(0,0,0,0.1)';
-              ctx.fill();
-              ctx.restore();
+              ctx.drawImage(coverArtElement, xOffset, yOffset, nW, nH);
+              // Face Lighting (Subtle top-down light)
+              const faceGrad = ctx.createLinearGradient(x, yOffset, x, yOffset + nH);
+              faceGrad.addColorStop(0, 'rgba(255, 255, 255, 0.15)'); // Top light
+              faceGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0)');
+              faceGrad.addColorStop(1, 'rgba(0, 0, 0, 0.25)');       // Bottom depth shadow
+              ctx.fillStyle = faceGrad;
+              ctx.fillRect(xOffset, yOffset, nW, nH);
             } else {
-              ctx.fillStyle = 'white';
+              // Fallback if no cover art
+              const baseColor = note.type === 'tile' ? '#4f46e5' : '#22c55e';
+              ctx.fillStyle = baseColor;
               ctx.fill();
             }
-
-            // Power-up Icon with shadow
-            ctx.save();
-            ctx.shadowBlur = 10;
-            ctx.shadowColor = 'rgba(0,0,0,0.5)';
-            ctx.fillStyle = (note.powerUp === 'shield' || !coverArtElement) ? 'white' : '#fff';
-            ctx.font = 'bold 22px Inter';
-            ctx.textAlign = 'center';
-            ctx.fillText(note.powerUp === 'shield' ? '🛡️' : '❤️', x, y + 8);
             ctx.restore();
+
+            // 3. Top Edge Highlight (Bevel effect)
+            ctx.save();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.roundRect(xOffset + 1, yOffset + 1, nW - 2, nH - 2, cornerRadius);
+            ctx.clip();
+            ctx.beginPath();
+            ctx.moveTo(xOffset, yOffset + 1);
+            ctx.lineTo(xOffset + nW, yOffset + 1);
+            ctx.stroke();
+            ctx.restore();
+
+            // Power-up Icon overlay
+            if (note.type === 'powerup') {
+              ctx.save();
+              ctx.shadowBlur = 15;
+              ctx.shadowColor = 'rgba(0,0,0,0.6)';
+              ctx.fillStyle = 'white';
+              ctx.font = 'bold 24px Inter';
+              ctx.textAlign = 'center';
+              ctx.fillText(note.powerUp === 'shield' ? '🛡️' : '❤️', x, y + 8);
+              ctx.restore();
+            }
           } else if (note.type === 'obstacle') {
             ctx.fillStyle = '#b91c1c'; ctx.fill();
-          } else {
-            const grad = ctx.createLinearGradient(x, y - nH / 2, x, y + nH / 2);
-            grad.addColorStop(0.10, '#eeeeeeff'); // White highlight at top
-            grad.addColorStop(0.15, '#eeeeeeff');              // Blend into bg color
-            grad.addColorStop(1, '#ffffffff');
-            ctx.fillStyle = grad;
-            ctx.fill();
-            // Borders removed as requested
           }
           ctx.restore();
         }
@@ -1369,9 +1418,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                           TRK {queueIndex + 1}
                         </span>
                       )}
-                      <span className="text-[8px] font-bold text-white/60 uppercase tracking-widest">
-                        {(completion)}%
-                      </span>
+
                     </div>
                   </div>
 
@@ -1422,225 +1469,303 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
             {/* Overlays Layer (Behind the Drawer) */}
             <div className="absolute inset-0 z-0">
-              {/* Pause Overlay - Spotify Style */}
+              {/* Pause Overlay - Pro Redesign */}
               {isPaused && !isGameOver && !isCleared && (
-                <div className="absolute inset-0 z-[120] flex flex-col items-center justify-center overflow-hidden">
-                  {/* Background Art */}
+                <div className="absolute inset-0 z-[120] flex flex-col items-center overflow-hidden animate-in fade-in duration-500 h-[100dvh] max-h-screen">
+                  {/* Background Art with Soft Pulse */}
                   {currentSong?.coverArt && (
                     <div className="absolute inset-0 z-0">
-                      <img src={currentSong.coverArt} className="w-full h-full object-cover" />
+                      <img
+                        src={currentSong.coverArt}
+                        className="w-full h-full object-cover scale-110 animate-[pulse_12s_infinite]"
+                      />
                     </div>
                   )}
-                  {/* Shifting Color Overlay */}
-                  <div
-                    className="absolute inset-0 z-0 opacity-85 transition-colors duration-500"
-                    style={{ backgroundColor: 'var(--active-bg, #0f172a)' }}
-                  />
-                  {/* Glassmorphic Blur overlay */}
-                  <div className="absolute inset-0 z-0 backdrop-blur-2xl" />
 
-                  <div className="flex flex-col gap-6 items-center w-full max-w-xs relative z-10">
-                    <h2 className="text-4xl font-black text-white italic tracking-tighter uppercase mb-4 drop-shadow-2xl">Paused</h2>
+                  {/* Depth Overlays */}
+                  <div className="absolute inset-0 z-0 bg-gradient-to-b from-black/80 via-transparent to-black/80" />
+                  <div className="absolute inset-0 z-0 backdrop-blur-md" />
 
-                    <button
-                      onClick={startResumeCountdown}
-                      className="w-full py-4 rounded-full bg-white text-black font-black text-sm uppercase tracking-widest hover:scale-105 transition-transform shadow-xl"
-                    >
-                      Resume
+                  {/* Top Bar Resources */}
+                  <div className="w-full p-4 flex justify-between items-center relative z-20">
+                    <button onClick={handleAbort} className="w-9 h-9 rounded-full bg-white/5 border border-white/10 backdrop-blur-md flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
 
-                    <button
-                      onClick={restartSession}
-                      className="w-full py-4 rounded-full bg-white/10 border border-white/20 text-white font-bold text-sm uppercase tracking-widest hover:bg-white/20 transition-colors backdrop-blur-md"
-                    >
-                      Restart
-                    </button>
-
-                    <button
-                      onClick={handleAbort}
-                      className="text-xs font-bold text-white/40 uppercase tracking-widest hover:text-white transition-colors mt-4"
-                    >
-                      Quit Game
-                    </button>
+                    <div className="flex items-center gap-2 bg-black/40 backdrop-blur-xl px-3 py-1.5 rounded-xl border border-white/5 shadow-2xl">
+                      <span className="text-[10px] font-black text-white flex items-center gap-1">{globalHearts}<span className="text-red-500 text-[9px]">❤️</span></span>
+                      <div className="w-px h-2.5 bg-white/10 mx-1"></div>
+                      <span className="text-[10px] font-black text-white flex items-center gap-1">{globalShields}<span className="text-blue-500 text-[9px]">🛡️</span></span>
+                    </div>
                   </div>
-                </div>
-              )}
 
+                  {/* Main Pause Column */}
+                  <div className="flex-1 w-full flex flex-col items-center justify-center relative z-20 px-6 gap-6 text-center pb-8 overflow-y-auto no-scrollbar">
 
-              {/* Game Over Screen - Spotify Style */}
-              {isGameOver && (
-                <div className="absolute inset-0 z-[120] flex flex-col items-center justify-center p-6 animate-in fade-in duration-300 overflow-hidden">
-                  {/* Background Art */}
-                  {currentSong?.coverArt && (
-                    <div className="absolute inset-0 z-0">
-                      <img src={currentSong.coverArt} className="w-full h-full object-cover grayscale opacity-50" />
-                    </div>
-                  )}
-                  {/* Shifting Color Overlay */}
-                  <div
-                    className="absolute inset-0 z-0 opacity-90 transition-colors duration-500"
-                    style={{ backgroundColor: 'var(--active-bg, #0f172a)' }}
-                  />
-                  {/* Glassmorphic Blur */}
-                  <div className="absolute inset-0 z-0 backdrop-blur-3xl" />
-
-                  <div className="max-w-sm w-full relative z-10 flex flex-col items-center gap-6">
-                    <h3 className="text-5xl font-black italic text-white uppercase tracking-tighter drop-shadow-xl">Game Over</h3>
-
-                    {/* Song Info */}
-                    <div className="text-center">
-                      <h4 className="text-xl font-black text-white italic truncate max-w-[250px]">{currentSong?.fileName.replace(/\.[^/.]+$/, "")}</h4>
+                    {/* Header Group */}
+                    <div className="flex flex-col items-center gap-0.5">
+                      <span className="text-[9px] font-black uppercase tracking-[0.4em] text-white/40 mb-0.5">Session Suspended</span>
+                      <h3 className="text-4xl font-black italic text-white uppercase tracking-tighter drop-shadow-2xl">Signal Interrupted</h3>
                     </div>
 
-                    {/* Stats Card */}
-                    <div className="w-full p-6 flex flex-col gap-4 bg-white/5 backdrop-blur-xl border border-white/5 rounded-[2rem] shadow-2xl">
-                      <div className="flex justify-between items-center border-b border-white/5 pb-4">
-                        <span className="text-xs font-bold text-white/60 uppercase tracking-widest">Score</span>
-                        <span className="text-2xl font-black text-white italic">{score.toLocaleString()}</span>
+                    {/* Album Art Pod */}
+                    <div className="relative group shrink-0">
+                      <div className="absolute -inset-4 bg-white/5 rounded-full blur-2xl animate-pulse opacity-50"></div>
+                      <div className="w-36 h-36 rounded-[2rem] overflow-hidden border-2 border-white/10 shadow-[0_25px_50px_rgba(0,0,0,0.6)] relative z-10">
+                        {currentSong?.coverArt ? (
+                          <img src={currentSong.coverArt} className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full bg-zinc-900 flex items-center justify-center"><span className="text-3xl">🎵</span></div>
+                        )}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent"></div>
                       </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-xs font-bold text-white/60 uppercase tracking-widest">Progress</span>
-                        <span className="text-lg font-black text-white italic">{completion}%</span>
-                      </div>
-                      <div className="flex gap-2 mt-2">
-                        <div className="flex-1 bg-white/5 rounded-lg p-2 text-center">
-                          <span className="block text-xl font-black text-white">{sessionPerfects}<span className="text-yellow-500 text-sm">⭐</span></span>
-                          <span className="text-[9px] font-bold text-white/40 uppercase">Gold (Perfects)</span>
-                        </div>
-                        <div className="flex-1 bg-white/5 rounded-lg p-2 text-center">
-                          <span className="block text-xl font-black text-white">{expEarned}<span className="text-blue-400 text-sm">XP</span></span>
-                          <span className="text-[9px] font-bold text-white/40 uppercase">Growth</span>
-                        </div>
+                      <div className="absolute -bottom-2 translate-x-1/2 right-1/2 bg-zinc-950 px-3 py-1 rounded-lg border border-white/10 z-20 shadow-2xl min-w-[120px]">
+                        <p className="text-[8px] font-black text-white/60 uppercase tracking-widest truncate">
+                          {currentSong?.fileName.replace(/\.[^/.]+$/, "")}
+                        </p>
                       </div>
                     </div>
 
-                    {/* Actions */}
-                    <div className="w-full space-y-3">
-                      {/* Revive Button */}
-                      {(() => {
-                        const goldCost = 50 * (reviveCount + 1);
-                        const canAffordRevive = userPerfects >= goldCost && globalShields >= 2;
-
-                        return (
-                          <button
-                            onClick={handleRevive}
-                            disabled={!canAffordRevive}
-                            className={`w-full py-4 rounded-full font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 transition-all
-                               ${canAffordRevive
-                                ? "bg-[#312e81] text-white hover:bg-[#312e81]/80 hover:scale-105 shadow-lg shadow-indigo-500/10"
-                                : "bg-zinc-800 text-white/20 cursor-not-allowed opacity-50"
-                              }`}
-                          >
-                            <span>Revive</span>
-                            <span className="text-[10px] bg-black/20 px-1.5 py-0.5 rounded font-bold">
-                              {goldCost}G + 2🛡️
-                            </span>
-                          </button>
-                        );
-                      })()}
-
-                      {/* Retry Button */}
-                      {(() => {
-                        const { canAfford, shieldCost } = checkCanAfford();
-                        return (
-                          <button
-                            onClick={canAfford ? restartSession : undefined}
-                            disabled={!canAfford}
-                            className={`w-full py-4 rounded-full font-black text-sm uppercase tracking-widest transition-all flex flex-col items-center justify-center leading-none gap-1
-                               ${canAfford
-                                ? "bg-white/10 text-white border border-white/10 hover:bg-white/20 hover:scale-105"
-                                : "bg-zinc-800 text-white/20 cursor-not-allowed"
-                              }`}
-                          >
-                            <span>Play Again</span>
-                            <span className="text-[9px] font-bold opacity-60">
-                              {canAfford ? `COST: 2❤️ ${shieldCost}🛡️` : "Low Energy"}
-                            </span>
-                          </button>
-                        );
-                      })()}
+                    {/* Action Sector */}
+                    <div className="w-full max-w-[260px] space-y-3">
+                      <button
+                        onClick={startResumeCountdown}
+                        className="group relative w-full py-4 rounded-2xl bg-white text-black font-black text-[12px] uppercase tracking-[0.2em] shadow-[0_15px_30px_rgba(255,255,255,0.1)] hover:scale-[1.02] active:scale-95 transition-all overflow-hidden"
+                      >
+                        <span className="relative z-10">Resume Flow</span>
+                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent -translate-x-[100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
+                      </button>
 
                       <button
-                        onClick={handleClaimAwards}
-                        className="w-full py-4 text-xs font-bold text-white/40 uppercase tracking-widest hover:text-white transition-colors"
+                        onClick={restartSession}
+                        className="w-full py-3.5 rounded-2xl bg-white/5 border border-white/10 text-white/60 font-black text-[10px] uppercase tracking-[0.2em] hover:bg-white/10 hover:text-white transition-all active:scale-95"
                       >
-                        Claim Rewards & Exit
+                        Restart Song
                       </button>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* Success Screen - Spotify Style */}
-              {isCleared && (
-                <div className="absolute inset-0 z-[130] flex flex-col items-center justify-center p-6 animate-in fade-in duration-300 overflow-hidden">
-                  {/* Background Art */}
+
+              {/* Game Over Screen - Pro Redesign */}
+              {isGameOver && (
+                <div className="absolute inset-0 z-[120] flex flex-col items-center overflow-hidden animate-in fade-in duration-500 h-[100dvh] max-h-screen">
+                  {/* Background Art with Rhythmic Pulse */}
                   {currentSong?.coverArt && (
                     <div className="absolute inset-0 z-0">
-                      <img src={currentSong.coverArt} className="w-full h-full object-cover" />
+                      <img
+                        src={currentSong.coverArt}
+                        className="w-full h-full object-cover grayscale opacity-40 scale-110 animate-[pulse_8s_infinite]"
+                      />
                     </div>
                   )}
-                  {/* Shifting Color Overlay */}
-                  <div
-                    className="absolute inset-0 z-0 opacity-85 transition-colors duration-500"
-                    style={{ backgroundColor: 'var(--active-bg, #0f172a)' }}
-                  />
-                  {/* Glassmorphic Blur Overlay */}
-                  <div className="absolute inset-0 z-0 backdrop-blur-3xl" />
 
-                  {/* Confetti / Glow */}
-                  <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-green-500/10 rounded-full blur-[80px]"></div>
+                  {/* Depth Overlays */}
+                  <div className="absolute inset-0 z-0 bg-gradient-to-b from-black via-transparent to-black opacity-60" />
+                  <div className="absolute inset-0 z-0 backdrop-blur-md" />
+
+                  {/* Top Bar Resources */}
+                  <div className="w-full p-4 flex justify-between items-center relative z-20">
+                    <button onClick={handleAbort} className="w-9 h-9 rounded-full bg-white/5 border border-white/10 backdrop-blur-md flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+
+                    <div className="flex items-center gap-2 bg-black/40 backdrop-blur-xl px-3 py-1.5 rounded-xl border border-white/5 shadow-2xl">
+                      <span className="text-[10px] font-black text-white flex items-center gap-1">{globalHearts}<span className="text-red-500 text-[9px]">❤️</span></span>
+                      <div className="w-px h-2.5 bg-white/10 mx-1"></div>
+                      <span className="text-[10px] font-black text-white flex items-center gap-1">{globalShields}<span className="text-blue-500 text-[9px]">🛡️</span></span>
+                    </div>
                   </div>
 
-                  <div className="max-w-sm w-full relative z-10 flex flex-col items-center gap-6">
-                    {/* Stars */}
-                    <div className="flex gap-2">
-                      <StarIcon active={true} className="w-8 h-8 text-yellow-400 drop-shadow-[0_0_10px_rgba(250,204,21,0.5)] animate-[bounce_1s_infinite]" />
-                      <StarIcon active={true} className="w-10 h-10 text-yellow-400 drop-shadow-[0_0_15px_rgba(250,204,21,0.6)] -translate-y-2 animate-[bounce_1.2s_infinite]" />
-                      <StarIcon active={true} className="w-8 h-8 text-yellow-400 drop-shadow-[0_0_10px_rgba(250,204,21,0.5)] animate-[bounce_0.8s_infinite]" />
+                  {/* Main Result Column */}
+                  <div className="flex-1 w-full flex flex-col items-center justify-center relative z-20 px-6 gap-6 overflow-y-auto no-scrollbar pb-8 text-center">
+
+                    {/* Header Group */}
+                    <div className="flex flex-col items-center gap-1">
+                      <span className="text-[9px] font-black uppercase tracking-[0.4em] text-red-500 opacity-80 leading-none">Better Luck Next Time</span>
+                      <h3 className="text-4xl font-black italic text-white uppercase tracking-tighter drop-shadow-2xl">Game Over</h3>
                     </div>
 
-                    <h3 className="text-5xl font-black italic text-white uppercase tracking-tighter drop-shadow-xl animate-in zoom-in-0 duration-500">Complete</h3>
-
-                    {/* Song Info */}
-                    <div className="text-center">
-                      <p className="text-sm font-bold text-green-400 uppercase tracking-widest mb-1 drop-shadow-lg">Perfect Performance</p>
-                      <h4 className="text-xl font-black text-white italic truncate max-w-[250px] shadow-sm">{currentSong?.fileName.replace(/\.[^/.]+$/, "")}</h4>
-                    </div>
-
-                    {/* Stats Card */}
-                    <div className="w-full bg-white/5 backdrop-blur-xl border border-white/5 rounded-[2rem] p-6 flex flex-col gap-4 shadow-2xl">
-                      {/* Rewards Row */}
-                      <div className="flex justify-between items-center border-b border-white/5 pb-4">
-                        <span className="text-xs font-bold text-blue-200/60 uppercase tracking-widest">Rewards</span>
-                        <div className="flex items-center gap-3">
-                          <span className="text-xl font-black text-white">+{sessionPerfects}<span className="text-yellow-500 text-base ml-0.5">Gold</span></span>
-                          {(completion >= 50) && (
-                            <span className="text-xl font-black text-yellow-400">+{completion >= 100 ? 10 : 5}⭐</span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Level Progress */}
-                      <div className="space-y-2">
-                        <div className="flex justify-between items-end">
-                          <span className="text-[10px] font-black text-blue-200/60 uppercase tracking-widest">Level {Math.floor((currentExp + animatedExp) / 10000) + 1}</span>
-                          <span className="text-[10px] font-bold text-blue-400">+{animatedExp} XP</span>
-                        </div>
-                        <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden relative">
-                          <div className="absolute top-0 left-0 h-full bg-blue-500 transition-all duration-1000 ease-out" style={{ width: `${((currentExp + animatedExp) % 10000) / 100}%` }}></div>
-                        </div>
+                    {/* Compact Album Art Pod */}
+                    <div className="relative group shrink-0">
+                      <div className="absolute -inset-4 bg-red-600/20 rounded-full blur-2xl animate-pulse"></div>
+                      <div className="w-28 h-28 rounded-[1.5rem] overflow-hidden border-2 border-white/20 shadow-2xl relative z-10 rotate-[-2deg]">
+                        {currentSong?.coverArt ? (
+                          <img src={currentSong.coverArt} className="w-full h-full object-cover grayscale opacity-80" />
+                        ) : (
+                          <div className="w-full h-full bg-zinc-900 flex items-center justify-center"><span className="text-3xl">🎵</span></div>
+                        )}
+                        <div className="absolute inset-0 bg-red-950/40 mix-blend-overlay"></div>
                       </div>
                     </div>
 
-                    {/* Main Action */}
-                    <button
-                      onClick={handleClaimAwards}
-                      className="w-full py-4 rounded-full bg-[#312e81] text-white font-black text-sm uppercase tracking-widest hover:bg-[#312e81]/80 hover:scale-105 transition-all shadow-[0_0_20px_rgba(49,46,129,0.3)]"
-                    >
-                      Claim Rewards
-                    </button>
+                    <div className="flex flex-col gap-0.5">
+                      <p className="text-[9px] font-black text-red-500 uppercase tracking-widest leading-none mb-1">Song Failed</p>
+                      <h4 className="text-xs font-black text-white italic truncate max-w-[200px] mx-auto opacity-70 leading-none">
+                        {currentSong?.fileName.replace(/\.[^/.]+$/, "")}
+                      </h4>
+                    </div>
+
+                    {/* Stat Pods - Compacted */}
+                    <div className="w-full max-w-[280px] grid grid-cols-2 gap-2">
+                      <div className="col-span-2 bg-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-4 flex flex-col items-center justify-center">
+                        <span className="text-[8px] font-black text-white/30 uppercase tracking-[0.3em] mb-1">Final Score</span>
+                        <span className="text-2xl font-black italic text-white tracking-tighter tabular-nums">{score.toLocaleString()}</span>
+                      </div>
+                      <div className="bg-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-3 flex flex-col items-center justify-center">
+                        <span className="text-[8px] font-black text-white/30 uppercase tracking-widest mb-1">Progress</span>
+                        <span className="text-lg font-black italic text-white">{completion}%</span>
+                      </div>
+                      <div className="bg-indigo-500/10 backdrop-blur-2xl border border-indigo-500/20 rounded-2xl p-3 flex flex-col items-center justify-center">
+                        <span className="text-[8px] font-black text-blue-400 uppercase tracking-widest mb-1">EXP Earned</span>
+                        <span className="text-lg font-black italic text-white">+{expEarned}</span>
+                      </div>
+                    </div>
+
+                    {/* Action Sector */}
+                    <div className="w-full max-w-[280px] space-y-2">
+                      {(() => {
+                        const goldCost = 50 * (reviveCount + 1);
+                        const canAffordRevive = userPerfects >= goldCost && globalShields >= 2;
+                        return (
+                          <button
+                            onClick={handleRevive}
+                            disabled={!canAffordRevive}
+                            className={`group relative w-full py-4 rounded-2xl font-black text-[11px] uppercase tracking-[0.2em] overflow-hidden transition-all active:scale-95
+                               ${canAffordRevive
+                                ? "bg-white text-black shadow-[0_10px_30px_rgba(255,255,255,0.15)]"
+                                : "bg-white/5 text-white/20 border border-white/5 cursor-not-allowed"
+                              }`}
+                          >
+                            <div className="relative z-10 flex items-center justify-center gap-2">
+                              <span>Revive & Continue</span>
+                              <span className="text-[9px] opacity-40">({goldCost}G + 2🛡️)</span>
+                            </div>
+                            {canAffordRevive && <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent -translate-x-[100%] group-hover:translate-x-[100%] transition-transform duration-700"></div>}
+                          </button>
+                        );
+                      })()}
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          onClick={restartSession}
+                          className="py-3 rounded-2xl bg-white/5 border border-white/10 text-white font-black text-[9px] uppercase tracking-[0.2em] hover:bg-white/10 transition-all active:scale-95"
+                        >
+                          Restart
+                        </button>
+                        <button
+                          onClick={handleClaimAwards}
+                          className="py-3 rounded-2xl bg-red-600/20 border border-red-600/40 text-red-500 font-black text-[9px] uppercase tracking-[0.2em] hover:bg-red-600/30 transition-all active:scale-95"
+                        >
+                          Quit
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {/* Success Screen - Pro Redesign */}
+              {isCleared && (
+                <div className="absolute inset-0 z-[130] flex flex-col items-center overflow-hidden animate-in fade-in duration-500 h-[100dvh] max-h-screen">
+                  {/* Background Art with Soft Rhythmic Pulse */}
+                  {currentSong?.coverArt && (
+                    <div className="absolute inset-0 z-0">
+                      <img
+                        src={currentSong.coverArt}
+                        className="w-full h-full object-cover scale-110 animate-[pulse_10s_infinite]"
+                      />
+                    </div>
+                  )}
+
+                  {/* Depth Overlays */}
+                  <div className="absolute inset-0 z-0 bg-gradient-to-b from-black/80 via-transparent to-black/80" />
+                  <div className="absolute inset-0 z-0 backdrop-blur-md" />
+
+                  {/* Victory Glow */}
+                  <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] bg-green-500/10 rounded-full blur-[100px] animate-pulse"></div>
+                  </div>
+
+                  {/* Top Bar Resources */}
+                  <div className="w-full p-4 flex justify-end items-center relative z-20">
+                    <div className="flex items-center gap-2 bg-black/40 backdrop-blur-xl px-3 py-1.5 rounded-xl border border-white/5 shadow-2xl">
+                      <span className="text-[10px] font-black text-white flex items-center gap-1">{globalHearts}<span className="text-red-500 text-[9px]">❤️</span></span>
+                      <div className="w-px h-2.5 bg-white/10 mx-1"></div>
+                      <span className="text-[10px] font-black text-white flex items-center gap-1">{globalShields}<span className="text-blue-500 text-[9px]">🛡️</span></span>
+                    </div>
+                  </div>
+
+                  {/* Main Achievement Column */}
+                  <div className="flex-1 w-full flex flex-col items-center justify-center relative z-20 px-6 gap-4 overflow-y-auto no-scrollbar pb-8 text-center">
+
+                    {/* Stars - More Compact */}
+                    <div className="flex gap-3 mb-1 animate-in slide-in-from-bottom-4 duration-700">
+                      <StarIcon active={true} className="w-6 h-6 text-yellow-400 drop-shadow-[0_0_10px_rgba(250,204,21,0.6)] animate-bounce" />
+                      <StarIcon active={true} className="w-9 h-9 text-yellow-400 drop-shadow-[0_0_15px_rgba(250,204,21,0.8)] animate-[bounce_1.2s_infinite] -translate-y-2" />
+                      <StarIcon active={true} className="w-6 h-6 text-yellow-400 drop-shadow-[0_0_10px_rgba(250,204,21,0.6)] animate-[bounce_0.8s_infinite]" />
+                    </div>
+
+                    {/* Header Group */}
+                    <div className="flex flex-col items-center gap-0.5">
+                      <span className="text-[9px] font-black uppercase tracking-[0.4em] text-green-400 opacity-80 mb-0.5">Well Done!</span>
+                      <h3 className="text-4xl font-black italic text-white uppercase tracking-tighter drop-shadow-2xl">Song Complete</h3>
+                    </div>
+
+                    {/* Compact Album Art Pod */}
+                    <div className="relative group shrink-0">
+                      <div className="absolute -inset-4 bg-green-500/20 rounded-full blur-2xl animate-pulse"></div>
+                      <div className="w-24 h-24 rounded-[1.5rem] overflow-hidden border-2 border-white/20 shadow-2xl relative z-10 scale-105">
+                        {currentSong?.coverArt ? (
+                          <img src={currentSong.coverArt} className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full bg-zinc-900 flex items-center justify-center"><span className="text-2xl">🎵</span></div>
+                        )}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent"></div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-0.5">
+                      <p className="text-[9px] font-black text-green-400 uppercase tracking-widest leading-none mb-1">Now Playing</p>
+                      <h4 className="text-xs font-black text-white italic truncate max-w-[200px] mx-auto opacity-70 leading-none">
+                        {currentSong?.fileName.replace(/\.[^/.]+$/, "")}
+                      </h4>
+                    </div>
+
+                    {/* Reward & Stat Sector - Compacted */}
+                    <div className="w-full max-w-[280px] space-y-2">
+                      <div className="bg-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-4 flex flex-col gap-3">
+                        <div className="flex justify-between items-center border-b border-white/5 pb-2">
+                          <div className="flex flex-col items-start">
+                            <span className="text-[8px] font-black text-white/40 uppercase tracking-widest">Gold Earned</span>
+                            <span className="text-lg font-black italic text-white">+{sessionPerfects}<span className="text-yellow-500 text-[9px] ml-1 uppercase not-italic">Gold</span></span>
+                          </div>
+                          <div className="flex flex-col items-end">
+                            <span className="text-[8px] font-black text-white/40 uppercase tracking-widest">Stars Earned</span>
+                            <span className="text-lg font-black italic text-yellow-400">+{completion >= 100 ? 10 : 5}⭐</span>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="bg-black/20 rounded-xl p-2 border border-white/5">
+                            <span className="block text-[7px] font-black text-white/30 uppercase tracking-widest mb-0.5 text-left">Score</span>
+                            <div className="text-sm font-black text-blue-400 italic text-left">{score.toLocaleString()}</div>
+                          </div>
+                          <div className="bg-black/20 rounded-xl p-2 border border-white/5">
+                            <span className="block text-[7px] font-black text-white/30 uppercase tracking-widest mb-0.5 text-left">Accuracy</span>
+                            <div className="text-sm font-black text-white italic text-left">{Math.floor(completion)}%</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={handleClaimAwards}
+                        className="group relative w-full py-4 rounded-2xl bg-[#1ed760] text-black font-black text-[11px] uppercase tracking-[0.2em] shadow-[0_15px_30px_rgba(30,215,96,0.15)] hover:scale-[1.02] active:scale-95 transition-all overflow-hidden"
+                      >
+                        <span className="relative z-10">Claim Rewards</span>
+                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent -translate-x-[100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1674,122 +1799,149 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                     <span className="text-8xl font-black italic text-white uppercase tracking-tighter drop-shadow-[0_0_40px_rgba(255,255,255,0.6)] animate-in zoom-in-50 duration-300">
                       {resumeCountdown > 0 ? resumeCountdown : 'GO!'}
                     </span>
-                    <p className="text-xs font-bold text-white/60 uppercase tracking-[0.4em] mt-4 drop-shadow-md">Prepare for Flow</p>
+                    <p className="text-xs font-bold text-white/60 uppercase tracking-[0.4em] mt-4 drop-shadow-md">Get Ready</p>
                   </div>
                 </div>
               )}
 
-              {/* Start Overlay - Always on Drawer */}
+              {/* Start Overlay - Pro Redesign */}
               {!isActive && !isCleared && !isGameOver && (
-                <div className="absolute inset-0 z-[110] flex flex-col items-center rounded-2xl overflow-hidden">
-                  {/* Background Art */}
+                <div className="absolute inset-0 z-[110] flex flex-col items-center overflow-hidden animate-in fade-in duration-500 h-[100dvh] max-h-screen">
+                  {/* Background Art with Soft Pulse */}
                   {currentSong?.coverArt && (
                     <div className="absolute inset-0 z-0">
-                      <img src={currentSong.coverArt} className="w-full h-full object-cover" />
+                      <img
+                        src={currentSong.coverArt}
+                        className="w-full h-full object-cover scale-110 animate-[pulse_14s_infinite]"
+                      />
                     </div>
                   )}
-                  {/* Shifting Color Overlay */}
-                  <div
-                    className="absolute inset-0 z-0 opacity-85 transition-colors duration-500"
-                    style={{ backgroundColor: 'var(--active-bg, #0f172a)' }}
-                  />
-                  {/* Glassmorphic Blur Overlay */}
-                  <div className="absolute inset-0 z-0 backdrop-blur-3xl" />
 
-                  {/* Top Bar (Abort & Resources) */}
-                  <div className="w-full p-6 flex justify-between items-center relative z-20">
-                    <button onClick={handleAbort} className="w-10 h-10 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center text-white hover:bg-white/10 transition-all">
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                  {/* Depth Overlays */}
+                  <div className="absolute inset-0 z-0 bg-gradient-to-b from-black/80 via-transparent to-black/80" />
+                  <div className="absolute inset-0 z-0 backdrop-blur-md" />
+
+                  {/* Top Bar Resources */}
+                  <div className="w-full p-4 flex justify-between items-center relative z-20">
+                    <button onClick={handleAbort} className="w-9 h-9 rounded-full bg-white/5 border border-white/10 backdrop-blur-md flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
 
-                    <div className="flex items-center gap-2 bg-black/40 backdrop-blur-md px-4 py-2 rounded-full border border-white/5">
-                      <span className="text-xs font-bold text-white flex items-center gap-1">{globalHearts}<span className="text-red-500 text-[10px]">❤️</span></span>
-                      <div className="w-px h-3 bg-white/10"></div>
-                      <span className="text-xs font-bold text-white flex items-center gap-1">{globalShields}<span className="text-blue-500 text-[10px]">🛡️</span></span>
+                    <div className="flex items-center gap-2 bg-black/40 backdrop-blur-xl px-3 py-1.5 rounded-xl border border-white/5 shadow-2xl">
+                      <span className="text-[10px] font-black text-white flex items-center gap-1">{globalHearts}<span className="text-red-500 text-[9px]">❤️</span></span>
+                      <div className="w-px h-2.5 bg-white/10 mx-1"></div>
+                      <span className="text-[10px] font-black text-white flex items-center gap-1">{globalShields}<span className="text-blue-500 text-[9px]">🛡️</span></span>
                     </div>
                   </div>
 
-                  {/* Main Content */}
-                  <div className="flex-1 w-full flex flex-col items-center justify-center relative z-20 px-6 sm:px-8 py-8 sm:pb-12 gap-6 sm:gap-8">
+                  {/* Main Start Column */}
+                  <div className="flex-1 w-full flex flex-col items-center justify-center relative z-20 px-6 gap-4 text-center pb-8 overflow-y-auto no-scrollbar">
 
-                    {/* Album Art & Title */}
-                    <div className="flex flex-col items-center gap-4 text-center">
-                      <div className="w-32 h-32 sm:w-48 sm:h-48 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden border border-white/10 relative group">
+                    {/* Header Group */}
+                    <div className="flex flex-col items-center gap-0.5">
+                      <span className="text-[9px] font-black uppercase tracking-[0.3em] text-white/40 mb-0.5 leading-none">Now Playing</span>
+                      <h3 className="text-xl font-black italic text-white uppercase tracking-tighter drop-shadow-2xl max-w-[240px] truncate leading-tight">
+                        {currentSong?.fileName.replace(/\.[^/.]+$/, "")}
+                      </h3>
+                    </div>
+
+                    {/* Compact Album Art Pod */}
+                    <div className="relative group shrink-0">
+                      <div className="absolute -inset-4 bg-blue-500/10 rounded-full blur-2xl animate-pulse"></div>
+                      <div className="w-28 h-28 sm:w-36 sm:h-36 rounded-[1.5rem] overflow-hidden border-2 border-white/10 shadow-[0_20px_40px_rgba(0,0,0,0.6)] relative z-10 transition-transform duration-700 group-hover:scale-105">
                         {currentSong?.coverArt ? (
-                          <img src={currentSong.coverArt} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
+                          <img src={currentSong.coverArt} className="w-full h-full object-cover" />
                         ) : (
-                          <div className="w-full h-full bg-zinc-800 flex items-center justify-center"><span className="text-4xl">🎵</span></div>
+                          <div className="w-full h-full bg-zinc-900 flex items-center justify-center"><span className="text-3xl">🎵</span></div>
                         )}
-                      </div>
-                      <div>
-                        <h2 className="text-xl sm:text-2xl font-black text-white italic tracking-tighter leading-tight drop-shadow-lg max-w-[280px] sm:max-w-[300px] mx-auto truncate">
-                          {currentSong?.fileName.replace(/\.[^/.]+$/, "")}
-                        </h2>
-                        <p className="text-xs font-bold text-white/40 uppercase tracking-widest mt-1">Ready to Play</p>
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent"></div>
                       </div>
                     </div>
 
-                    {/* Settings Container */}
-                    <div className="w-full max-w-xs space-y-4 sm:space-y-6">
-
-                      {/* Selectors */}
-                      <div className="flex flex-col gap-3 sm:gap-4">
-                        <div className="w-full bg-[#1e1b4b]/40 backdrop-blur-md border border-white/5 rounded-2xl p-4 sm:p-6 flex flex-row gap-2 shadow-2xl">
+                    {/* Protocol Pod (Selector & Focus) */}
+                    <div className="w-full max-w-[260px] space-y-3">
+                      <div className="bg-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-4 shadow-xl space-y-3">
+                        {/* Mode Selector */}
+                        <div className="flex gap-1.5">
                           {['classic', 'endless'].map(m => (
                             <button
                               key={m}
                               onClick={() => setSelectedMode(m as any)}
-                              className={`flex-1 py-2 text-[10px] font-black uppercase rounded-md transition-all ${selectedMode === m ? 'bg-[#312e81] text-white shadow-sm' : 'text-white/40 hover:text-white'}`}
+                              className={`flex-1 py-1.5 text-[9px] font-black uppercase tracking-widest rounded-lg transition-all border ${selectedMode === m
+                                ? 'bg-white text-black border-white shadow-md'
+                                : 'bg-transparent text-white/40 border-white/10 hover:border-white/20'
+                                }`}
                             >
                               {m}
                             </button>
                           ))}
                         </div>
+
+                        {/* Ultra Focus Toggle */}
+                        <div className="flex items-center justify-between pt-1 border-t border-white/5">
+                          <div className="flex flex-col items-start">
+                            <span className="text-[9px] font-black text-white uppercase tracking-wider leading-none">Ultra Focus</span>
+                            <span className="text-[8px] font-bold text-white/30 uppercase tracking-widest mt-0.5">Minimal Lanes</span>
+                          </div>
+                          <button
+                            onClick={() => setUltraFocus(!ultraFocus)}
+                            className={`w-10 h-5 rounded-full relative transition-all duration-300 ${ultraFocus ? 'bg-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.5)]' : 'bg-white/10'}`}
+                          >
+                            <div className={`absolute top-1 w-3 h-3 rounded-full bg-white transition-all duration-300 ${ultraFocus ? 'left-6 shadow-sm' : 'left-1 opacity-40'}`}></div>
+                          </button>
+                        </div>
                       </div>
 
-                      {/* Play Button */}
+                      {/* Execute Button */}
                       {(() => {
-                        const { canAfford } = checkCanAfford();
+                        const { canAfford, shieldCost } = checkCanAfford();
                         return (
                           <button
                             onClick={canAfford ? startGame : undefined}
-                            className={`w-full py-4 rounded-full font-black text-sm uppercase tracking-widest transition-all transform active:scale-95 shadow-xl flex items-center justify-center gap-2
-                                  ${canAfford ? 'bg-[#1ed760] text-black hover:bg-[#1fdf64] hover:scale-105' : 'bg-red-900/20 text-red-500 border border-red-500/20 cursor-not-allowed'}`}
+                            className={`group relative w-full py-4 rounded-2xl font-black text-[12px] uppercase tracking-[0.2em] transition-all overflow-hidden active:scale-95 shadow-xl
+                               ${canAfford
+                                ? "bg-[#1ed760] text-black hover:scale-[1.02] shadow-[0_15px_30px_rgba(30,215,96,0.15)]"
+                                : "bg-white/5 text-white/20 border border-white/5 cursor-not-allowed"
+                              }`}
                           >
-                            {canAfford ? 'START' : 'INSUFFICIENT FUNDS'}
+                            <span className="relative z-10 flex items-center justify-center gap-2">
+                              {canAfford ? 'Play Now' : 'Not Enough Shields'}
+                              {canAfford && <span className="text-[9px] opacity-40">({shieldCost}🛡️)</span>}
+                            </span>
+                            {canAfford && <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent -translate-x-[100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>}
                           </button>
                         );
                       })()}
                     </div>
-
                   </div>
                 </div>
               )}
             </div>
           </div>
 
-        </div >
+        </div>
 
         {feedback && (
-          <div className="absolute top-[20%] left-0 right-0 flex justify-center pointer-events-none z-[150] animate-in zoom-in-50 fade-in duration-150">
+          <div className="absolute top-[20%] left-0 right-0 flex justify-center pointer-events-none z-[150] animate-in zoom-in-50 fade-in duration-200">
             <p
-              className={`font-black italic uppercase ${feedback.color}`}
+              className={`font-black italic uppercase drop-shadow-[0_0_20px_rgba(255,255,255,0.4)] ${feedback.color} animate-out zoom-out-125 fade-out duration-500 fill-mode-forwards`}
               style={{
-                fontSize: `${1.5 * feedback.scale}rem`,
-                transform: `scale(${feedback.scale}) rotate(${Math.random() * 10 - 5}deg)`
+                fontSize: `${2.2 * feedback.scale}rem`,
+                transform: `scale(${feedback.scale}) rotate(${feedback.rotation}deg)`
               }}
             >
               {feedback.text}
             </p>
           </div>
-        )}
+        )
+        }
 
         <audio
           ref={audioRef}
           onEnded={handleFinish}
           onLoadedMetadata={() => durationRef.current = audioRef.current?.duration || 1}
         />
-      </div >
+      </div>
     </>
   );
 };

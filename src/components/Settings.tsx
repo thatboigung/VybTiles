@@ -4,7 +4,6 @@ import type { UserStats } from '../types';
 import { ShareModal } from './ShareModal';
 
 interface SettingsProps {
-  onBack: () => void;
   user: UserStats;
   onUpdateProfile: (name: string) => void;
   onLogout: () => void;
@@ -12,7 +11,7 @@ interface SettingsProps {
 }
 
 export const Settings: React.FC<SettingsProps> = ({
-  onBack, user, onUpdateProfile, onLogout, onUpgrade
+  user, onUpdateProfile, onLogout, onUpgrade
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [tempName, setTempName] = useState(user.username);
@@ -57,7 +56,7 @@ export const Settings: React.FC<SettingsProps> = ({
       ),
       content: (
         <div className="space-y-4">
-          <p className="font-bold text-white">The GAV3NA Difference</p>
+          <p className="font-bold text-white">The GAVENA Difference</p>
           <p>GAV3NA was born from Tapuwa P Mapfumo's relentless passion to solve real-world problems through innovative software. With years of experience as a professional developer and entrepreneur, Tapuwa recognized a gap in the market—businesses needed partners who truly understood their challenges and could deliver transformative solutions, not just code.</p>
           <p>From the ground up, GAV3NA has been built on the belief that technology is a powerful tool for change. Whether it's creating intelligent chatbot-powered platforms for cross-border remittance services, designing interactive gaming experiences like rhythm-based games, or developing AI-enhanced applications that redefine productivity, we approach each project as an opportunity to push boundaries and create something meaningful. Our portfolio spans React Native mobile experiences, Laravel-powered backends, AI integrations, and cutting-edge web applications—each one crafted with precision and creativity.</p>
           <p>What sets us apart isn't just our technical expertise—it's our commitment to understanding the human side of software. We collaborate deeply with our clients to translate their vision into reality. Whether working with startups exploring new ideas or enterprises scaling their operations, we bring the same level of innovation, dedication, and excellence. At GAV3NA, we don't just build applications; we build partnerships that drive real business impact and create digital solutions that users love.</p>
@@ -71,7 +70,7 @@ export const Settings: React.FC<SettingsProps> = ({
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" />
         </svg>
       ),
-      content: 'All uploaded audio is processed locally and via Google APIs. We do not store your audio files on our servers. Use tracks you have rights to play.'
+      content: 'All uploaded audio is processed locally and via Gavena APIs. We do not store your audio files on our servers. Use tracks you have rights to play.'
     }
   ];
 
@@ -83,21 +82,8 @@ export const Settings: React.FC<SettingsProps> = ({
   };
 
   return (
-    <div className="h-full container mx-auto px-4 py-8 overflow-y-auto no-scrollbar animate-in fade-in slide-in-from-right-4 duration-500">
-      <div className="max-w-2xl mx-auto space-y-12 pb-20">
-        <div className="flex items-center gap-4">
-          <button
-            onClick={onBack}
-            className="w-12 h-12 rounded-full border border-white/10 flex items-center justify-center hover:bg-white/5 transition-colors"
-          >
-            <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
-          <h2 className="text-2xl font-black italic uppercase tracking-tighter text-white">
-            Settings
-          </h2>
-        </div>
+    <div className="animate-in fade-in slide-in-from-right-4 duration-500">
+      <div className="max-w-2xl mx-auto space-y-12">
 
         <div className="space-y-6">
           {/* Profile Section */}
