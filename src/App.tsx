@@ -4,7 +4,6 @@ import type { Level } from './types';
 import { Header } from './components/Header';
 import { BeatGame } from './components/BeatGame';
 import { HistoryList } from './components/HistoryList';
-import { Settings } from './components/Settings';
 import { LandingPage } from './components/LandingPage';
 import { CurrencyBar } from './components/CurrencyBar';
 import { ExchangeSuccessModal } from './components/ExchangeSuccessModal';
@@ -721,7 +720,7 @@ const App: React.FC = () => {
                 <div className="absolute -top-24 -left-24 w-64 h-64 bg-blue-500/10 rounded-full blur-[100px] animate-pulse"></div>
                 <div className="absolute -bottom-24 -right-24 w-64 h-64 bg-purple-500/10 rounded-full blur-[100px] animate-pulse delay-700"></div>
 
-                {screen !== 'game' && (
+                {true && (
                   <div className="w-full relative z-10 scale-105">
                     <Header
                       user={user}

@@ -102,7 +102,7 @@ const StarIcon = ({ active, className }: { active: boolean; className?: string }
 );
 
 export const BeatGame: React.FC<BeatGameProps> = ({
-  playlist, allSongs, onExit, globalHearts, globalShields, userPerfects, onUseCurrency, onFinish, currentExp, initialMode, onStartPlay
+  playlist, allSongs, onExit, globalHearts, globalShields, userPerfects, onUseCurrency, onFinish, initialMode, onStartPlay
 }) => {
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
   const [selectedMode, setSelectedMode] = useState<GameMode>(initialMode || (playlist.length > 1 ? 'endless' : 'classic'));
@@ -135,7 +135,6 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   const [playerLane, setPlayerLane] = useState(1);
   const [invincible, setInvincible] = useState(false);
   const [expEarned, setExpEarned] = useState(0);
-  const [animatedExp, setAnimatedExp] = useState(0);
   const [feedback, setFeedback] = useState<{ text: string; color: string; scale: number; rotation: number } | null>(null);
   const [resumeCountdown, setResumeCountdown] = useState<number | null>(null);
   const [ultraFocus, setUltraFocus] = useState(true);
@@ -692,15 +691,6 @@ export const BeatGame: React.FC<BeatGameProps> = ({
       // On finish, it's 100%
       setCompletion(100);
 
-      const durationAnim = 1000;
-      const startTime = performance.now();
-      const animate = (now: number) => {
-        const elapsed = now - startTime;
-        const prog = Math.min(elapsed / durationAnim, 1);
-        setAnimatedExp(Math.floor(prog * earned));
-        if (prog < 1) requestAnimationFrame(animate);
-      };
-      requestAnimationFrame(animate);
     }
   };
 
@@ -1103,8 +1093,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
               ctx.fillRect(renderX - tailWidth / 2, y - fillHeight, tailWidth, fillHeight);
 
               // 4. Energy Pulse (At the top of the fill level)
-              if (isHeld && note.holdProgress < 1) {
-                const pulseSize = 10 + Math.sin(now / 50) * 5;
+              if (isHeld && (note.holdProgress ?? 0) < 1) {
                 ctx.shadowBlur = 15;
                 ctx.shadowColor = '#22d3ee';
                 ctx.fillStyle = '#fff';
