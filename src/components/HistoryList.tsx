@@ -14,7 +14,26 @@ export const HistoryList: React.FC<HistoryListProps> = ({
 }) => {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [trackToDelete, setTrackToDelete] = useState<AudioAnalysis | null>(null);
+  const [sortBy, setSortBy] = useState<'name' | 'date' | 'completion'>('date');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [showSortPopup, setShowSortPopup] = useState(false);
   const menuRef = React.useRef<HTMLDivElement>(null);
+
+  // Sorting Logic
+  const sortedHistory = [...history].sort((a, b) => {
+    if (sortBy === 'name') {
+      return a.fileName.localeCompare(b.fileName);
+    }
+    if (sortBy === 'date') {
+      return sortOrder === 'desc' ? b.timestamp - a.timestamp : a.timestamp - b.timestamp;
+    }
+    if (sortBy === 'completion') {
+      const compA = a.completion || 0;
+      const compB = b.completion || 0;
+      return compA - compB; // Uncompleted first
+    }
+    return 0;
+  });
 
   React.useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -32,19 +51,37 @@ export const HistoryList: React.FC<HistoryListProps> = ({
   if (history.length === 0) {
     return (
       <div className="h-full flex flex-col items-center justify-center p-12 text-center ">
-        <svg className="w-12 h-12 text-slate-800 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className="w-12 h-12 text-white/20 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
         </svg>
-        <p className="text-slate-600 text-[10px] font-black uppercase tracking-[0.3em]">Upload audio files</p>
+        <p className="text-blue-200/40 text-[10px] font-black uppercase tracking-[0.3em]">Upload audio files</p>
       </div>
     );
   }
 
   return (
     <>
+      {/* Library Controls */}
+      <div className="flex items-center justify-between mb-4 px-2">
+        <div className="flex flex-col">
+          <h2 className="text-[10px] font-black uppercase tracking-[0.4em] text-blue-200/40">Vibe Rush</h2>
+          <p className="text-[10px] text-white/20 font-bold uppercase tracking-widest mt-0.5">{history.length} TRACKS TOTAL</p>
+        </div>
+
+        <button
+          onClick={() => setShowSortPopup(true)}
+          className="flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 transition-all group"
+        >
+          <svg className="w-3 h-3 text-blue-200/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" />
+          </svg>
+          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-200/60 group-hover:text-white">Sort By</span>
+        </button>
+      </div>
+
       <div className="pr-1" ref={menuRef}>
-        {history.map((item) => (
-          <div key={item.id} className="w-full flex items-center gap-[10px] group backdrop-blur-sm mb-[2px]">
+        {sortedHistory.map((item) => (
+          <div key={item.id} className="w-full flex items-center gap-[10px] group backdrop-blur-sm mb-[2px] bg-black/10 rounded-3xl">
             <div className="flex-1 min-w-0 flex items-center gap-[10px] p-[10px] cursor-pointer relative overflow-hidden rounded-xl" onClick={() => onSelect(item)}>
               {/* Hover effect background */}
               <div className="absolute inset-0"></div>
@@ -72,7 +109,7 @@ export const HistoryList: React.FC<HistoryListProps> = ({
 
               {/* Duration Display */}
               {item.duration && (
-                <span className="text-xs font-bold text-slate-500 tabular-nums mr-4">
+                <span className="text-xs font-bold text-blue-200/60 tabular-nums mr-4">
                   {Math.floor(item.duration / 60)}:{Math.floor(item.duration % 60).toString().padStart(2, '0')}
                 </span>
               )}
@@ -85,7 +122,7 @@ export const HistoryList: React.FC<HistoryListProps> = ({
                   e.stopPropagation();
                   setOpenMenuId(item.id);
                 }}
-                className="w-10 h-10 rounded-full flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10 transition-colors"
+                className="w-10 h-10 rounded-full flex items-center justify-center text-blue-200/40 hover:text-white hover:bg-white/10 transition-colors"
                 title="Track Options"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -115,7 +152,7 @@ export const HistoryList: React.FC<HistoryListProps> = ({
                 <h3 className="text-xl font-black text-white truncate w-full px-2">
                   {history.find(t => t.id === openMenuId)?.fileName.replace(/\.[^/.]+$/, "")}
                 </h3>
-                <p className="text-[10px] text-slate-500 uppercase tracking-[0.2em] font-bold mt-1">Track Intelligence Active</p>
+                <p className="text-[10px] text-blue-200/60 uppercase tracking-[0.2em] font-bold mt-1">Track Intelligence Active</p>
               </div>
 
               <div className="space-y-3">
@@ -147,12 +184,76 @@ export const HistoryList: React.FC<HistoryListProps> = ({
 
                 <button
                   onClick={() => setOpenMenuId(null)}
-                  className="w-full py-3 text-slate-500 font-bold uppercase text-[10px] tracking-widest rounded-2xl hover:text-white transition-colors"
+                  className="w-full py-3 text-blue-200/60 font-bold uppercase text-[10px] tracking-widest rounded-2xl hover:text-white transition-colors"
                 >
                   Dismiss
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sort Options Popup */}
+      {showSortPopup && (
+        <div
+          className="fixed inset-0 z-[300] flex items-center justify-center p-6 bg-black/60 backdrop-blur-md animate-in fade-in duration-300"
+          onClick={() => setShowSortPopup(false)}
+        >
+          <div
+            className="w-full max-w-sm bg-[#1e1b4b]/95 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] p-8 shadow-[0_22px_70px_4px_rgba(0,0,0,0.56)] animate-in zoom-in-95 fade-in duration-300"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex flex-col items-center text-center mb-8">
+              <div className="w-16 h-16 bg-white shrink-0 rounded-2xl flex items-center justify-center mb-4 shadow-xl text-black">
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" />
+                </svg>
+              </div>
+              <h3 className="text-xl font-black text-white uppercase tracking-widest">Sort Library</h3>
+              <p className="text-[10px] text-blue-200/40 uppercase tracking-[0.2em] font-bold mt-1">Organize your frequency collection</p>
+            </div>
+
+            <div className="space-y-2">
+              <button
+                onClick={() => { setSortBy('name'); setShowSortPopup(false); }}
+                className={`w-full flex items-center justify-between p-4 rounded-2xl transition-all border ${sortBy === 'name' ? 'bg-white border-white' : 'bg-white/5 border-white/5 hover:bg-white/10 text-white'}`}
+              >
+                <span className={`font-black uppercase text-[10px] tracking-widest ${sortBy === 'name' ? 'text-black' : 'text-blue-200'}`}>Name (A-Z)</span>
+                {sortBy === 'name' && <div className="w-2 h-2 rounded-full bg-black"></div>}
+              </button>
+
+              <button
+                onClick={() => { setSortBy('date'); setSortOrder('desc'); setShowSortPopup(false); }}
+                className={`w-full flex items-center justify-between p-4 rounded-2xl transition-all border ${sortBy === 'date' && sortOrder === 'desc' ? 'bg-white border-white' : 'bg-white/5 border-white/5 hover:bg-white/10 text-white'}`}
+              >
+                <span className={`font-black uppercase text-[10px] tracking-widest ${sortBy === 'date' && sortOrder === 'desc' ? 'text-black' : 'text-blue-200'}`}>Newest First</span>
+                {sortBy === 'date' && sortOrder === 'desc' && <div className="w-2 h-2 rounded-full bg-black"></div>}
+              </button>
+
+              <button
+                onClick={() => { setSortBy('date'); setSortOrder('asc'); setShowSortPopup(false); }}
+                className={`w-full flex items-center justify-between p-4 rounded-2xl transition-all border ${sortBy === 'date' && sortOrder === 'asc' ? 'bg-white border-white' : 'bg-white/5 border-white/5 hover:bg-white/10 text-white'}`}
+              >
+                <span className={`font-black uppercase text-[10px] tracking-widest ${sortBy === 'date' && sortOrder === 'asc' ? 'text-black' : 'text-blue-200'}`}>Oldest First</span>
+                {sortBy === 'date' && sortOrder === 'asc' && <div className="w-2 h-2 rounded-full bg-black"></div>}
+              </button>
+
+              <button
+                onClick={() => { setSortBy('completion'); setShowSortPopup(false); }}
+                className={`w-full flex items-center justify-between p-4 rounded-2xl transition-all border ${sortBy === 'completion' ? 'bg-white border-white' : 'bg-white/5 border-white/5 hover:bg-white/10 text-white'}`}
+              >
+                <span className={`font-black uppercase text-[10px] tracking-widest ${sortBy === 'completion' ? 'text-black' : 'text-blue-200'}`}>Uncompleted First</span>
+                {sortBy === 'completion' && <div className="w-2 h-2 rounded-full bg-black"></div>}
+              </button>
+            </div>
+
+            <button
+              onClick={() => setShowSortPopup(false)}
+              className="w-full mt-8 py-4 text-blue-200/40 font-bold uppercase text-[10px] tracking-[0.3em] hover:text-white transition-colors"
+            >
+              Cancel
+            </button>
           </div>
         </div>
       )}

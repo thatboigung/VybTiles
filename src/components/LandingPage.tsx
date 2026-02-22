@@ -8,7 +8,7 @@ interface LandingPageProps {
 const slides = [
   {
     id: 'start',
-    title: 'Vyb Tiles',
+    title: 'Vibe Rush',
     subtitle: 'Gavena Presents',
     description: 'Transform any audio file into a high-fidelity interactive experience with beat-synced rhythm challenge.',
     cta: 'Get Started'
@@ -54,7 +54,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onEnter }) => {
         <div key={slide.id} className="animate-in fade-in slide-in-from-bottom-12 duration-1000 flex flex-col items-center">
           <p className="text-[12px] font-black text-slate-500 uppercase tracking-[0.8em] mb-4">{slide.subtitle}</p>
           <h1 className="text-8xl font-black italic tracking-tighter mb-4 text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-200 to-slate-400 drop-shadow-[0_0_15px_rgba(255,255,255,0.5)]">
-            VYB TAPS</h1>
+            VIBE RUSH</h1>
           <p className="text-lg text-slate-400 font-medium max-w-2xl leading-relaxed mb-12">{slide.description}</p>
 
           {slide.id === 'identity' && (

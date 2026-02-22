@@ -46,7 +46,7 @@ export const Settings: React.FC<SettingsProps> = ({
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
       ),
-      content: 'Vyb Taps V2.5 is a high-performance, local-first rhythm engine. It utilizes advanced signal processing to analyze audio frequency and transient data, transforming any track into a precise, beat-synced gameplay map in real-time'
+      content: 'Vibe Rush V2.5 is a high-performance, local-first rhythm engine. It utilizes advanced signal processing to analyze audio frequency and transient data, transforming any track into a precise, beat-synced gameplay map in real-time'
     },
     {
       title: 'About Developer',
@@ -204,7 +204,7 @@ export const Settings: React.FC<SettingsProps> = ({
           </button>
 
           <div className="text-center text-[10px] text-slate-600 uppercase tracking-widest mt-8 pb-8">
-            Vyb Tiles v2.5.0 • Build 2026.02
+            Vibe Rush v2.5.0 • Build 2026.02
           </div>
         </div>
       </div>

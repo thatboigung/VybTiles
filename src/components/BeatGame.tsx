@@ -1,20 +1,19 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { AudioAnalysis, GameMode, Level } from '../types';
-import { RechargeModal } from './RechargeModal';
 
 const LANES = 4;
 const TARGET_Y_RATIO = 0.8;
 
 const BG_PALETTE = [
-  '#1e1b4b', // Deep Indigo
-  '#0f172a', // Midnight Blue
-  '#312e81', // Royal Focus
-  '#111827', // Rich Graphite
-  '#2e1065', // Deep Purple
-  '#181818ff', // Dark Red
-  '#6d032eff', // Deep Pink
-  '#924002ff'  // Dark Amber/Yellow
+  '#1e1b4b', // Royal Indigo (Focus Base)
+  '#4f46e5', // Electric Indigo (Momentum)
+  '#7c3aed', // Deep Violet (Flow State)
+  '#c026d3', // Cosmic Magenta (Dopamine Pop)
+  '#0891b2', // Cyber Cyan (High Contrast)
+  '#111827', // Obsidian (Immersion Depth)
+  '#2e1065', // Midnight Purple (Emotional Depth)
+  '#ec4899'  // Cyber Pink (Pure Energy)
 ];
 
 const BG_INTERVALS = [10, 20, 15, 23];
@@ -86,6 +85,10 @@ interface Note {
   hitTimestamp?: number; // Track when this note was hit
   isMoving?: boolean; // New property for moving tiles
   originalLane?: number; // Store original lane for moving tiles
+  isLong?: boolean; // New: Is this a long/held tile
+  duration?: number; // New: Duration of the long tile in seconds
+  holdProgress?: number; // New: 0 to 1 progress of the hold
+  isFullyHeld?: boolean; // New: Did the user hold it to the end
 }
 
 interface Particle {
@@ -119,7 +122,6 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   const [isFailing, setIsFailing] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
   const [failedNoteId, setFailedNoteId] = useState<string | null>(null);
-  const [showRechargeModal, setShowRechargeModal] = useState(false);
 
   const [score, setScore] = useState(0);
   const [laneHits, setLaneHits] = useState<number[]>(new Array(LANES).fill(0));
@@ -139,6 +141,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   const [expEarned, setExpEarned] = useState(0);
   const [animatedExp, setAnimatedExp] = useState(0);
   const [feedback, setFeedback] = useState<{ text: string; color: string; scale: number } | null>(null);
+  const [resumeCountdown, setResumeCountdown] = useState<number | null>(null);
 
   // Shuffle queue for endless mode
   const [shuffleQueue, setShuffleQueue] = useState<AudioAnalysis[]>([]);
@@ -165,6 +168,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   });
 
   const isDraggingRef = useRef(false);
+  const holdingNotesRef = useRef<Set<string>>(new Set()); // Track IDs of long notes being held
 
   // Initialize shuffle queue for endless mode
   React.useEffect(() => {
@@ -223,6 +227,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     setIsFailing(false);
     setActiveLives(5);
     setReviveCount(0);
+    setCompletion(0); // Reset completion for new song in endless
 
     // Reset background transition time for new song
     bgRef.current.lastChangeTime = 0;
@@ -415,15 +420,20 @@ export const BeatGame: React.FC<BeatGameProps> = ({
           setSessionPerfects(p => p + bonus);
           // Heavy shake for perfect hit (Only shake for first 3 perfects to prevent lag)
           if (combo < 3) setShake(10);
-          showFeedback('PERFECT', 'text-yellow-400 drop-shadow-[0_0_15px_rgba(250,204,21,0.8)]', 1.5);
+          showFeedback('PERFECT', 'text-yellow-400 drop-shadow-[0_0_15px_rgba(250,204,21,0.8)]', 1.0);
           spawnParticles(x, nY, '#facc15', 20); // Gold particles
         } else {
           // GREAT: < 0.22s (Non-Perfect Hit breaks Perfect Combo)
           const points = 300;
           setScore(s => s + points);
           setCombo(0); // Reset combo if not perfect
-          showFeedback('GREAT', 'text-cyan-400 drop-shadow-[0_0_10px_rgba(34,211,238,0.5)]', 1.2);
+          showFeedback('GREAT', 'text-cyan-400 drop-shadow-[0_0_10px_rgba(34,211,238,0.5)]', 0.8);
           spawnParticles(x, nY, '#22d3ee', 12); // Cyan particles
+        }
+
+        // Start Hold if it's a Long Tile
+        if (noteToHit.isLong && noteToHit.duration) {
+          holdingNotesRef.current.add(noteToHit.id);
         }
       }
     } else {
@@ -435,12 +445,18 @@ export const BeatGame: React.FC<BeatGameProps> = ({
       handleFailure();
       setCombo(0);
       setShake(5);
-      showFeedback('MISS', 'text-red-500 opacity-80', 0.9);
+      showFeedback('MISS', 'text-red-500 opacity-80', 0.7);
     }
   }, [isActive, isPaused, isGameOver, isCleared, combo, selectedMode, handleFailure, selectedLevel]);
 
   const loadTrackNotes = (analysis: AudioAnalysis) => {
+    let excludeUntil = 0;
+    const lastLaneTimes = new Array(LANES).fill(-1); // TRACK LAST SPAWN TIME IN EACH LANE
+
     notesRef.current = analysis.beats.flatMap((beatTime, index) => {
+      // Skip if this beat falls within a long tile's "exclusive" period
+      if (beatTime < excludeUntil) return [];
+
       let type: 'obstacle' | 'powerup' | 'tile' = 'tile';
       const isPowerUp = Math.random() < 0.1;
       let powerType: PowerUpType = 'none';
@@ -453,15 +469,41 @@ export const BeatGame: React.FC<BeatGameProps> = ({
       }
 
       // Varying Tiles Logic (Moving Tiles)
-      // Only for non-powerups, chance based on difficulty or late game
-      // "Half the beat" logic -> Switch lanes every 2 beats
-      // Chance: 20% on Medium/Hard?
       let isMoving = false;
       if (type === 'tile' && (selectedLevel === 'medium' || selectedLevel === 'hard')) {
         isMoving = Math.random() < 0.25;
       }
 
-      const lane1 = Math.floor(Math.random() * LANES);
+      // Long Tiles Logic
+      let isLong = false;
+      let duration = 0;
+      if (type === 'tile' && !isMoving && Math.random() < 0.15) {
+        isLong = true;
+        duration = 0.4 + Math.random() * 0.8;
+        excludeUntil = beatTime + duration + 0.2;
+      }
+
+      // FIND A VALID LANE (Minimum gap: 0.25s)
+      const MIN_GAP = 0.25;
+      let lane1 = Math.floor(Math.random() * LANES);
+
+      // Attempt to find a lane that has enough gap
+      if (beatTime - lastLaneTimes[lane1] < MIN_GAP) {
+        // Try all other lanes
+        const availableLanes = [];
+        for (let l = 0; l < LANES; l++) {
+          if (beatTime - lastLaneTimes[l] >= MIN_GAP) availableLanes.push(l);
+        }
+        if (availableLanes.length > 0) {
+          lane1 = availableLanes[Math.floor(Math.random() * availableLanes.length)];
+        } else {
+          // If no lanes are available, we skip this beat to prevent cluster
+          return [];
+        }
+      }
+
+      lastLaneTimes[lane1] = beatTime + (isLong ? duration : 0);
+
       const notes: Note[] = [{
         id: `${analysis.id}-n-${index}-a`,
         time: beatTime,
@@ -471,32 +513,55 @@ export const BeatGame: React.FC<BeatGameProps> = ({
         type,
         powerUp: powerType,
         isMoving,
-        originalLane: lane1
+        originalLane: lane1,
+        isLong,
+        duration,
+        holdProgress: 0
       }];
 
-      // Calculate song duration approximation (last beat)
+      // Skip double tiles if it's a long tile
+      if (isLong) return notes;
+
       const lastBeat = analysis.beats.length > 0 ? analysis.beats[analysis.beats.length - 1] : 0;
       const isLateGame = lastBeat > 0 && beatTime > (lastBeat * 0.6);
-
-      // Dynamic Difficulty:
-      // - Normal: 25% double tile chance
-      // - Late Game (>60%): 60% double tile chance (Climax)
       const doubleTileChance = isLateGame ? 0.6 : 0.25;
 
-      // Double Tile Chance
       if (Math.random() < doubleTileChance) {
-        let lane2 = Math.floor(Math.random() * LANES);
-        while (lane2 === lane1) lane2 = Math.floor(Math.random() * LANES);
+        // Find a second lane that is also valid
+        const nextBeatTime = beatTime + 0.15;
+        const availableLanes2 = [];
+        for (let l = 0; l < LANES; l++) {
+          if (l !== lane1 && nextBeatTime - lastLaneTimes[l] >= MIN_GAP) {
+            availableLanes2.push(l);
+          }
+        }
 
-        notes.push({
-          id: `${analysis.id}-n-${index}-b`,
-          time: beatTime + 0.15, // Sequential offset for stream effect
-          lane: lane2,
-          hit: false,
-          missed: false,
-          type: 'tile', // Secondary note is always a basic tile
-          powerUp: 'none'
-        });
+        if (availableLanes2.length > 0) {
+          let lane2 = availableLanes2[Math.floor(Math.random() * availableLanes2.length)];
+
+          let isLong2 = false;
+          let duration2 = 0;
+          if (!isLong && Math.random() < 0.1) {
+            isLong2 = true;
+            duration2 = 0.4 + Math.random() * 0.6;
+            excludeUntil = beatTime + 0.15 + duration2 + 0.2;
+          }
+
+          notes.push({
+            id: `${analysis.id}-n-${index}-b`,
+            time: nextBeatTime,
+            lane: lane2,
+            hit: false,
+            missed: false,
+            type: 'tile',
+            powerUp: 'none',
+            isLong: isLong2,
+            duration: duration2,
+            holdProgress: 0
+          });
+
+          lastLaneTimes[lane2] = nextBeatTime + (isLong2 ? duration2 : 0);
+        }
       }
 
       return notes;
@@ -575,6 +640,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     particlesRef.current = [];
 
     setScore(0); setCombo(0); setSessionHearts(0); setSessionShields(0); setSessionPerfects(0); setPlayerLane(1);
+    setCompletion(0); // Reset completion on game start
     setIsActive(true); setIsPaused(false); setIsGameOver(false); setIsCleared(false); setInvincible(false);
 
     // Reset background transition time
@@ -596,7 +662,6 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   const startGame = () => {
     const { canAfford } = checkCanAfford();
     if (!canAfford) {
-      setShowRechargeModal(true);
       return;
     }
 
@@ -613,6 +678,9 @@ export const BeatGame: React.FC<BeatGameProps> = ({
       loadNextSongInEndless();
       showFeedback('BEAT EXTENDED', 'text-blue-400', 1.2);
     } else {
+      // Guard: Don't mark as cleared or 100% if we already failed
+      if (isGameOver || isFailing) return;
+
       // EXP Formula: Base 300 + Performance
       const earned = 300 + (sessionPerfects * 10);
       setExpEarned(earned);
@@ -683,6 +751,32 @@ export const BeatGame: React.FC<BeatGameProps> = ({
       setInvincible(true);
       setTimeout(() => setInvincible(false), 3000);
     }
+  };
+
+  // Resume Countdown Logic
+  useEffect(() => {
+    if (resumeCountdown === null) return;
+
+    if (resumeCountdown > 0) {
+      const timer = setTimeout(() => {
+        setResumeCountdown(resumeCountdown - 1);
+      }, 1000);
+      return () => clearTimeout(timer);
+    } else {
+      // Countdown finished
+      setIsPaused(false);
+      setResumeCountdown(null);
+      if (audioRef.current) {
+        audioRef.current.playbackRate = 1.0; // Ensure speed is reset to normal
+        audioRef.current.play();
+      }
+    }
+  }, [resumeCountdown]);
+
+  const startResumeCountdown = () => {
+    setIsPaused(false); // Hide pause menu immediately or keep it? 
+    // Usually pause menu hides, and countdown shows over the game.
+    setResumeCountdown(3);
   };
 
   const restartSession = () => {
@@ -757,12 +851,28 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
       if (shake > 0) setShake(s => Math.max(0, s - 2));
 
-      ctx.save();
-      // Glitch effect: intense shake and color shifts during failure
-      const currentShake = isFailing ? 20 : shake;
-      ctx.translate((Math.random() - 0.5) * currentShake, (Math.random() - 0.5) * currentShake);
-
       ctx.clearRect(0, 0, w, h);
+
+      // Draw Cover Art Background (Cover Scale)
+      if (coverArtElement) {
+        const img = coverArtElement;
+        const imgRatio = img.width / img.height;
+        const canvasRatio = w / h;
+        let dW, dH, dX, dY;
+
+        if (canvasRatio > imgRatio) {
+          dW = w;
+          dH = w / imgRatio;
+          dX = 0;
+          dY = (h - dH) / 2;
+        } else {
+          dH = h;
+          dW = h * imgRatio;
+          dX = (w - dW) / 2;
+          dY = 0;
+        }
+        ctx.drawImage(img, dX, dY, dW, dH);
+      }
 
       // Update Background State
       if (displayTime >= bgRef.current.lastChangeTime + bgRef.current.nextInterval) {
@@ -778,8 +888,21 @@ export const BeatGame: React.FC<BeatGameProps> = ({
       const bgT = Math.min(1, timeSinceChange / BG_FADE_DURATION);
       const activeBgColor = lerpColor(bgRef.current.prevColor, bgRef.current.currColor, bgT);
 
+      // Overlay shifting color with semi-transparency
+      if (coverArtElement) {
+        ctx.globalAlpha = 0.82; // Balance immersion and readability
+      }
       ctx.fillStyle = activeBgColor;
       ctx.fillRect(0, 0, w, h);
+      ctx.globalAlpha = 1.0; // Reset
+
+      // Sync color to CSS variable for HTML overlays
+      gameAreaRef.current?.style.setProperty('--active-bg', activeBgColor);
+
+      ctx.save();
+      // Glitch effect: intense shake and color shifts during failure
+      const currentShake = isFailing ? 20 : shake;
+      ctx.translate((Math.random() - 0.5) * currentShake, (Math.random() - 0.5) * currentShake);
 
       // Rewind Logic during failure
       if (isFailing && failedNoteId) {
@@ -885,7 +1008,8 @@ export const BeatGame: React.FC<BeatGameProps> = ({
           }
         }
 
-        if (note.hit) return;
+        if (note.hit && !note.isLong) return;
+        if (note.hit && note.isLong && note.isFullyHeld) return;
 
         const timeDiff = note.time - displayTime;
         if (timeDiff > visibleRangeSeconds) return;
@@ -897,14 +1021,88 @@ export const BeatGame: React.FC<BeatGameProps> = ({
             handleFailure(note.id);
             showFeedback('MISS', 'text-red-500', 1.0);
           }
-          return;
+          // Only return if it's NOT a long tile being held/processed
+          if (!note.isLong || !note.hit) return;
         }
 
-        const y = targetY - (timeDiff * speed);
+        // Lock Y to targetY if note is hit but still active (long tile)
+        const y = (note.hit && note.isLong) ? targetY : targetY - (timeDiff * speed);
 
         if (y > -200 && y < h + 200) {
           const x = (note.lane * lW) + (lW / 2);
           const nW = lW * 0.92, nH = 150;
+
+          // Draw Tail for Long Tiles
+          if (note.isLong && note.duration) {
+            const tailHeight = note.duration * speed;
+            const isHeld = holdingNotesRef.current.has(note.id);
+
+            // Calculate how much of the tail is "burned" (passed targetY)
+            // If hit, we use displayTime - note.time to see progress
+            let burntHeight = 0;
+            if (note.hit) {
+              const holdTime = Math.max(0, displayTime - note.time);
+              burntHeight = Math.min(note.duration, holdTime) * speed;
+              note.holdProgress = Math.min(1, holdTime / note.duration);
+
+              // Auto-release if finished
+              if (note.holdProgress >= 1 && !note.isFullyHeld) {
+                note.isFullyHeld = true;
+                holdingNotesRef.current.delete(note.id);
+                setScore(s => s + 500); // Completion bonus
+                spawnParticles(x, targetY, '#facc15', 30);
+              }
+
+              // Bonus points while holding
+              if (isHeld) {
+                setScore(s => s + 10);
+                // Continuous particles at target line
+                if (Math.random() < 0.3) {
+                  spawnParticles(x, targetY, '#fff', 5);
+                }
+              }
+            }
+
+            ctx.save();
+            const tailY = y - tailHeight;
+
+            // Draw shadow/glow for the tail if being held
+            if (isHeld) {
+              ctx.shadowBlur = 20;
+              ctx.shadowColor = 'rgba(255, 255, 255, 0.5)';
+            }
+
+            // Tail Gradient
+            const tailGrad = ctx.createLinearGradient(x, y - burntHeight, x, tailY);
+            if (isHeld) {
+              tailGrad.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
+              tailGrad.addColorStop(1, 'rgba(255, 255, 255, 0.2)');
+            } else {
+              tailGrad.addColorStop(0, 'rgba(255, 255, 255, 0.4)');
+              tailGrad.addColorStop(1, 'rgba(255, 255, 255, 0.1)');
+            }
+
+            ctx.fillStyle = tailGrad;
+            // Draw tail from the top of the tile (y - nH/2) upwards
+            // But if hit, it should start from targetY (or y - burntHeight)
+            const tailStart = y - nH / 2;
+            const drawTop = tailY;
+            const drawBottom = tailStart - burntHeight;
+
+            if (drawBottom > drawTop) {
+              ctx.beginPath();
+              ctx.roundRect(x - (nW * 0.4) / 2, drawTop, nW * 0.4, drawBottom - drawTop, 4);
+              ctx.fill();
+            }
+
+            // Draw "End Cap" for long tiles
+            ctx.fillStyle = isHeld ? '#fff' : 'rgba(255,255,255,0.5)';
+            ctx.beginPath();
+            ctx.roundRect(x - (nW * 0.6) / 2, tailY - 10, nW * 0.6, 20, 10);
+            ctx.fill();
+
+            ctx.restore();
+          }
 
           ctx.save();
 
@@ -1024,6 +1222,38 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedMode, isPaused, isGameOver, isCleared, handleHit]);
 
+  // Keyboard Release Logic
+  useEffect(() => {
+    const handleKeyUp = (e: KeyboardEvent) => {
+      const keyMap: Record<string, number> = {
+        'KeyD': 0, 'KeyF': 1, 'KeyJ': 2, 'KeyK': 3,
+        'ArrowLeft': 0, 'ArrowDown': 1, 'ArrowUp': 2, 'ArrowRight': 3
+      };
+      if (e.code in keyMap) {
+        const lane = keyMap[e.code];
+        // Release any held notes in this lane
+        holdingNotesRef.current.forEach(id => {
+          const note = notesRef.current.find(n => n.id === id);
+          if (note && note.lane === lane) {
+            holdingNotesRef.current.delete(id);
+            note.isFullyHeld = true; // Mark as done so it disappears
+            // Spawn release particles
+            const rect = gameAreaRef.current?.getBoundingClientRect();
+            if (rect) {
+              const lW = rect.width / LANES;
+              const x = (lane * lW) + (lW / 2);
+              const targetY = rect.height * TARGET_Y_RATIO;
+              spawnParticles(x, targetY, '#fff', 15);
+            }
+          }
+        });
+      }
+    };
+
+    window.addEventListener('keyup', handleKeyUp);
+    return () => window.removeEventListener('keyup', handleKeyUp);
+  }, []);
+
   const onPointerDown = (e: React.PointerEvent) => {
     if (isFailing) return;
 
@@ -1036,6 +1266,27 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     if (r) {
       const l = Math.max(0, Math.min(LANES - 1, Math.floor((e.clientX - r.left) / (r.width / LANES))));
       handleHit(l, e.clientY - r.top);
+    }
+  };
+
+  const onPointerUp = (e: React.PointerEvent) => {
+    isDraggingRef.current = false;
+    const r = gameAreaRef.current?.getBoundingClientRect();
+    if (r) {
+      const lane = Math.max(0, Math.min(LANES - 1, Math.floor((e.clientX - r.left) / (r.width / LANES))));
+      // Release any held notes in this lane
+      holdingNotesRef.current.forEach(id => {
+        const note = notesRef.current.find(n => n.id === id);
+        if (note && note.lane === lane) {
+          holdingNotesRef.current.delete(id);
+          note.isFullyHeld = true; // Mark as done so it disappears
+          // Spawn release particles
+          const lW = r.width / LANES;
+          const x = (lane * lW) + (lW / 2);
+          const targetY = r.height * TARGET_Y_RATIO;
+          spawnParticles(x, targetY, '#fff', 15);
+        }
+      });
     }
   };
 
@@ -1064,13 +1315,9 @@ export const BeatGame: React.FC<BeatGameProps> = ({
       <div className="fixed inset-0 bg-[#0f172a] flex justify-center items-center z-[100] select-none touch-none"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
-        onPointerUp={() => isDraggingRef.current = false}
-        onPointerCancel={() => isDraggingRef.current = false}>
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}>
 
-        <RechargeModal
-          isOpen={showRechargeModal}
-          onClose={() => setShowRechargeModal(false)}
-        />
 
         <div ref={gameAreaRef} className={`relative w-full h-full 
           lg:w-[480px] lg:h-full lg:rounded-none lg:border-x lg:border-white/10 lg:shadow-2xl 
@@ -1080,7 +1327,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
         `}>
 
           {/* HUD - Separate Top Section */}
-          <div className="w-full p-4 z-[100] relative bg-[#0f172a] ">
+          <div className={`w-full p-4 z-[100] relative bg-[#0f172a] transition-all duration-300 ${(!isActive || isPaused || isGameOver || isCleared) ? 'h-0 p-0 overflow-hidden opacity-0 invisible' : 'h-auto opacity-100 visible'}`}>
             {/* Top Row: Art + Stats + Pause */}
             <div className="flex items-center justify-between gap-3">
 
@@ -1118,11 +1365,11 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                     </h3>
                     <div className="flex items-center gap-2">
                       {selectedMode === 'endless' && (
-                        <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">
+                        <span className="text-[8px] font-bold text-white/60 uppercase tracking-widest">
                           TRK {queueIndex + 1}
                         </span>
                       )}
-                      <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">
+                      <span className="text-[8px] font-bold text-white/60 uppercase tracking-widest">
                         {(completion)}%
                       </span>
                     </div>
@@ -1133,7 +1380,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
                     {/* Score */}
                     <div className="flex flex-col items-end">
-                      <span className="text-[7px] font-bold text-slate-500 uppercase tracking-widest leading-none mb-0.5">SCORE</span>
+                      <span className="text-[7px] font-bold text-white/60 uppercase tracking-widest leading-none mb-0.5">SCORE</span>
                       <span className="text-lg font-black italic text-white leading-none tracking-tighter">{score.toLocaleString()}</span>
                     </div>
 
@@ -1177,27 +1424,41 @@ export const BeatGame: React.FC<BeatGameProps> = ({
             <div className="absolute inset-0 z-0">
               {/* Pause Overlay - Spotify Style */}
               {isPaused && !isGameOver && !isCleared && (
-                <div className="absolute inset-0 bg-[#0f172a]/90 backdrop-blur-2xl flex flex-col items-center justify-center z-[120]">
-                  <div className="flex flex-col gap-6 items-center w-full max-w-xs">
-                    <h2 className="text-4xl font-black text-white italic tracking-tighter uppercase mb-4">Paused</h2>
+                <div className="absolute inset-0 z-[120] flex flex-col items-center justify-center overflow-hidden">
+                  {/* Background Art */}
+                  {currentSong?.coverArt && (
+                    <div className="absolute inset-0 z-0">
+                      <img src={currentSong.coverArt} className="w-full h-full object-cover" />
+                    </div>
+                  )}
+                  {/* Shifting Color Overlay */}
+                  <div
+                    className="absolute inset-0 z-0 opacity-85 transition-colors duration-500"
+                    style={{ backgroundColor: 'var(--active-bg, #0f172a)' }}
+                  />
+                  {/* Glassmorphic Blur overlay */}
+                  <div className="absolute inset-0 z-0 backdrop-blur-2xl" />
+
+                  <div className="flex flex-col gap-6 items-center w-full max-w-xs relative z-10">
+                    <h2 className="text-4xl font-black text-white italic tracking-tighter uppercase mb-4 drop-shadow-2xl">Paused</h2>
 
                     <button
-                      onClick={() => { setIsPaused(false); audioRef.current?.play(); }}
-                      className="w-full py-4 rounded-full bg-white text-black font-black text-sm uppercase tracking-widest hover:scale-105 transition-transform"
+                      onClick={startResumeCountdown}
+                      className="w-full py-4 rounded-full bg-white text-black font-black text-sm uppercase tracking-widest hover:scale-105 transition-transform shadow-xl"
                     >
                       Resume
                     </button>
 
                     <button
                       onClick={restartSession}
-                      className="w-full py-4 rounded-full bg-transparent border border-white/20 text-white font-bold text-sm uppercase tracking-widest hover:bg-white/10 transition-colors"
+                      className="w-full py-4 rounded-full bg-white/10 border border-white/20 text-white font-bold text-sm uppercase tracking-widest hover:bg-white/20 transition-colors backdrop-blur-md"
                     >
                       Restart
                     </button>
 
                     <button
                       onClick={handleAbort}
-                      className="text-xs font-bold text-slate-500 uppercase tracking-widest hover:text-white transition-colors mt-4"
+                      className="text-xs font-bold text-white/40 uppercase tracking-widest hover:text-white transition-colors mt-4"
                     >
                       Quit Game
                     </button>
@@ -1205,15 +1466,23 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                 </div>
               )}
 
+
               {/* Game Over Screen - Spotify Style */}
               {isGameOver && (
-                <div className="absolute inset-0 bg-[#111827]/95 backdrop-blur-3xl flex flex-col items-center justify-center p-6 z-[120] animate-in fade-in duration-300">
-                  {/* Album Art Blur Background */}
+                <div className="absolute inset-0 z-[120] flex flex-col items-center justify-center p-6 animate-in fade-in duration-300 overflow-hidden">
+                  {/* Background Art */}
                   {currentSong?.coverArt && (
-                    <div className="absolute inset-0 opacity-20 blur-3xl scale-125 pointer-events-none">
-                      <img src={currentSong.coverArt} className="w-full h-full object-cover grayscale" />
+                    <div className="absolute inset-0 z-0">
+                      <img src={currentSong.coverArt} className="w-full h-full object-cover grayscale opacity-50" />
                     </div>
                   )}
+                  {/* Shifting Color Overlay */}
+                  <div
+                    className="absolute inset-0 z-0 opacity-90 transition-colors duration-500"
+                    style={{ backgroundColor: 'var(--active-bg, #0f172a)' }}
+                  />
+                  {/* Glassmorphic Blur */}
+                  <div className="absolute inset-0 z-0 backdrop-blur-3xl" />
 
                   <div className="max-w-sm w-full relative z-10 flex flex-col items-center gap-6">
                     <h3 className="text-5xl font-black italic text-white uppercase tracking-tighter drop-shadow-xl">Game Over</h3>
@@ -1224,23 +1493,23 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                     </div>
 
                     {/* Stats Card */}
-                    <div className="w-full p-6 flex flex-col gap-4 shadow-2xl">
+                    <div className="w-full p-6 flex flex-col gap-4 bg-white/5 backdrop-blur-xl border border-white/5 rounded-[2rem] shadow-2xl">
                       <div className="flex justify-between items-center border-b border-white/5 pb-4">
-                        <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Score</span>
+                        <span className="text-xs font-bold text-white/60 uppercase tracking-widest">Score</span>
                         <span className="text-2xl font-black text-white italic">{score.toLocaleString()}</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Progress</span>
+                        <span className="text-xs font-bold text-white/60 uppercase tracking-widest">Progress</span>
                         <span className="text-lg font-black text-white italic">{completion}%</span>
                       </div>
                       <div className="flex gap-2 mt-2">
                         <div className="flex-1 bg-white/5 rounded-lg p-2 text-center">
                           <span className="block text-xl font-black text-white">{sessionPerfects}<span className="text-yellow-500 text-sm">⭐</span></span>
-                          <span className="text-[9px] font-bold text-slate-500 uppercase">Gold (Perfects)</span>
+                          <span className="text-[9px] font-bold text-white/40 uppercase">Gold (Perfects)</span>
                         </div>
                         <div className="flex-1 bg-white/5 rounded-lg p-2 text-center">
                           <span className="block text-xl font-black text-white">{expEarned}<span className="text-blue-400 text-sm">XP</span></span>
-                          <span className="text-[9px] font-bold text-slate-500 uppercase">Growth</span>
+                          <span className="text-[9px] font-bold text-white/40 uppercase">Growth</span>
                         </div>
                       </div>
                     </div>
@@ -1259,7 +1528,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                             className={`w-full py-4 rounded-full font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 transition-all
                                ${canAffordRevive
                                 ? "bg-[#312e81] text-white hover:bg-[#312e81]/80 hover:scale-105 shadow-lg shadow-indigo-500/10"
-                                : "bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-50"
+                                : "bg-zinc-800 text-white/20 cursor-not-allowed opacity-50"
                               }`}
                           >
                             <span>Revive</span>
@@ -1280,7 +1549,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                             className={`w-full py-4 rounded-full font-black text-sm uppercase tracking-widest transition-all flex flex-col items-center justify-center leading-none gap-1
                                ${canAfford
                                 ? "bg-white/10 text-white border border-white/10 hover:bg-white/20 hover:scale-105"
-                                : "bg-zinc-800 text-zinc-500 cursor-not-allowed"
+                                : "bg-zinc-800 text-white/20 cursor-not-allowed"
                               }`}
                           >
                             <span>Play Again</span>
@@ -1293,7 +1562,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
                       <button
                         onClick={handleClaimAwards}
-                        className="w-full py-4 text-xs font-bold text-slate-500 uppercase tracking-widest hover:text-white transition-colors"
+                        className="w-full py-4 text-xs font-bold text-white/40 uppercase tracking-widest hover:text-white transition-colors"
                       >
                         Claim Rewards & Exit
                       </button>
@@ -1304,7 +1573,21 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
               {/* Success Screen - Spotify Style */}
               {isCleared && (
-                <div className="absolute inset-0 bg-[#1e1b4b]/95 backdrop-blur-3xl flex flex-col items-center justify-center p-6 z-[130] animate-in fade-in duration-300">
+                <div className="absolute inset-0 z-[130] flex flex-col items-center justify-center p-6 animate-in fade-in duration-300 overflow-hidden">
+                  {/* Background Art */}
+                  {currentSong?.coverArt && (
+                    <div className="absolute inset-0 z-0">
+                      <img src={currentSong.coverArt} className="w-full h-full object-cover" />
+                    </div>
+                  )}
+                  {/* Shifting Color Overlay */}
+                  <div
+                    className="absolute inset-0 z-0 opacity-85 transition-colors duration-500"
+                    style={{ backgroundColor: 'var(--active-bg, #0f172a)' }}
+                  />
+                  {/* Glassmorphic Blur Overlay */}
+                  <div className="absolute inset-0 z-0 backdrop-blur-3xl" />
+
                   {/* Confetti / Glow */}
                   <div className="absolute inset-0 overflow-hidden pointer-events-none">
                     <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-green-500/10 rounded-full blur-[80px]"></div>
@@ -1322,15 +1605,15 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
                     {/* Song Info */}
                     <div className="text-center">
-                      <p className="text-sm font-bold text-green-400 uppercase tracking-widest mb-1">Perfect Performance</p>
-                      <h4 className="text-xl font-black text-white italic truncate max-w-[250px]">{currentSong?.fileName.replace(/\.[^/.]+$/, "")}</h4>
+                      <p className="text-sm font-bold text-green-400 uppercase tracking-widest mb-1 drop-shadow-lg">Perfect Performance</p>
+                      <h4 className="text-xl font-black text-white italic truncate max-w-[250px] shadow-sm">{currentSong?.fileName.replace(/\.[^/.]+$/, "")}</h4>
                     </div>
 
                     {/* Stats Card */}
-                    <div className="w-full border border-white/5 rounded-2xl p-6 flex flex-col gap-4 shadow-2xl">
+                    <div className="w-full bg-white/5 backdrop-blur-xl border border-white/5 rounded-[2rem] p-6 flex flex-col gap-4 shadow-2xl">
                       {/* Rewards Row */}
                       <div className="flex justify-between items-center border-b border-white/5 pb-4">
-                        <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Rewards</span>
+                        <span className="text-xs font-bold text-blue-200/60 uppercase tracking-widest">Rewards</span>
                         <div className="flex items-center gap-3">
                           <span className="text-xl font-black text-white">+{sessionPerfects}<span className="text-yellow-500 text-base ml-0.5">Gold</span></span>
                           {(completion >= 50) && (
@@ -1342,7 +1625,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                       {/* Level Progress */}
                       <div className="space-y-2">
                         <div className="flex justify-between items-end">
-                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Level {Math.floor((currentExp + animatedExp) / 10000) + 1}</span>
+                          <span className="text-[10px] font-black text-blue-200/60 uppercase tracking-widest">Level {Math.floor((currentExp + animatedExp) / 10000) + 1}</span>
                           <span className="text-[10px] font-bold text-blue-400">+{animatedExp} XP</span>
                         </div>
                         <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden relative">
@@ -1384,16 +1667,34 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                 </div>
               )}
 
+              {/* Resume Countdown Overlay - In Game Drawer */}
+              {resumeCountdown !== null && (
+                <div className="absolute inset-0 z-[150] flex flex-col items-center justify-center bg-black/20 backdrop-blur-[2px] animate-in fade-in duration-300">
+                  <div className="flex flex-col items-center">
+                    <span className="text-8xl font-black italic text-white uppercase tracking-tighter drop-shadow-[0_0_40px_rgba(255,255,255,0.6)] animate-in zoom-in-50 duration-300">
+                      {resumeCountdown > 0 ? resumeCountdown : 'GO!'}
+                    </span>
+                    <p className="text-xs font-bold text-white/60 uppercase tracking-[0.4em] mt-4 drop-shadow-md">Prepare for Flow</p>
+                  </div>
+                </div>
+              )}
+
               {/* Start Overlay - Always on Drawer */}
               {!isActive && !isCleared && !isGameOver && (
-                <div className="absolute inset-0 bg-[#0f172a]/95 backdrop-blur-3xl flex flex-col items-center z-[110] rounded-2xl">
-                  {/* Blurred Background Art */}
+                <div className="absolute inset-0 z-[110] flex flex-col items-center rounded-2xl overflow-hidden">
+                  {/* Background Art */}
                   {currentSong?.coverArt && (
-                    <div className="absolute inset-0 opacity-30 blur-3xl scale-125 pointer-events-none">
+                    <div className="absolute inset-0 z-0">
                       <img src={currentSong.coverArt} className="w-full h-full object-cover" />
-                      <div className="absolute inset-0 bg-gradient-to-b from-[#0f172a]/50 via-[#0f172a]/80 to-[#0f172a]"></div>
                     </div>
                   )}
+                  {/* Shifting Color Overlay */}
+                  <div
+                    className="absolute inset-0 z-0 opacity-85 transition-colors duration-500"
+                    style={{ backgroundColor: 'var(--active-bg, #0f172a)' }}
+                  />
+                  {/* Glassmorphic Blur Overlay */}
+                  <div className="absolute inset-0 z-0 backdrop-blur-3xl" />
 
                   {/* Top Bar (Abort & Resources) */}
                   <div className="w-full p-6 flex justify-between items-center relative z-20">
@@ -1424,7 +1725,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                         <h2 className="text-xl sm:text-2xl font-black text-white italic tracking-tighter leading-tight drop-shadow-lg max-w-[280px] sm:max-w-[300px] mx-auto truncate">
                           {currentSong?.fileName.replace(/\.[^/.]+$/, "")}
                         </h2>
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Ready to Play</p>
+                        <p className="text-xs font-bold text-white/40 uppercase tracking-widest mt-1">Ready to Play</p>
                       </div>
                     </div>
 
@@ -1438,7 +1739,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                             <button
                               key={m}
                               onClick={() => setSelectedMode(m as any)}
-                              className={`flex-1 py-2 text-[10px] font-black uppercase rounded-md transition-all ${selectedMode === m ? 'bg-[#312e81] text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+                              className={`flex-1 py-2 text-[10px] font-black uppercase rounded-md transition-all ${selectedMode === m ? 'bg-[#312e81] text-white shadow-sm' : 'text-white/40 hover:text-white'}`}
                             >
                               {m}
                             </button>
@@ -1474,7 +1775,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
             <p
               className={`font-black italic uppercase ${feedback.color}`}
               style={{
-                fontSize: `${3 * feedback.scale}rem`,
+                fontSize: `${1.5 * feedback.scale}rem`,
                 transform: `scale(${feedback.scale}) rotate(${Math.random() * 10 - 5}deg)`
               }}
             >

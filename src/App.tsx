@@ -27,7 +27,8 @@ const STORAGE_KEYS = {
   HEARTS: 'music_tiles_fever_hearts',
   SHIELDS: 'music_tiles_fever_shields',
   USER: 'music_tiles_fever_user',
-  EXP: 'music_tiles_fever_exp'
+  EXP: 'music_tiles_fever_exp',
+  LAST_HEART_REGEN: 'music_tiles_fever_last_regen'
 };
 
 const MAX_HEARTS = 10;
@@ -44,7 +45,7 @@ const LogoutConfirmModal: React.FC<{ isOpen: boolean; onClose: () => void; onCon
             </svg>
           </div>
           <h3 className="text-xl font-black text-white uppercase tracking-tighter">Terminate Session?</h3>
-          <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-2 leading-relaxed">
+          <p className="text-xs text-blue-200 font-bold uppercase tracking-widest mt-2 leading-relaxed">
             Logging out will clear all local data, including your library and stats.
           </p>
 
@@ -77,7 +78,7 @@ const LoadingScreen: React.FC = () => (
         <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
         <div className="w-2 h-2 bg-pink-500 rounded-full animate-bounce"></div>
       </div>
-      <p className="mt-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Fetching Resources...</p>
+      <p className="mt-4 text-xs font-bold text-blue-200/60 uppercase tracking-widest">Fetching Resources...</p>
     </div>
   </div>
 );
@@ -90,8 +91,10 @@ const App: React.FC = () => {
   const [analysisStep, setAnalysisStep] = useState<string>('Initializing');
   const [gameMode, setGameMode] = useState<GameMode>('classic');
   const [screen, setScreen] = useState<'landing' | 'collection' | 'game' | 'settings' | 'help'>('landing');
-  const [activeTab, setActiveTab] = useState<'local' | 'online'>('local');
   const [isLoading, setIsLoading] = useState(true);
+  const [showCurrencyDropdown, setShowCurrencyDropdown] = useState(false);
+  const [showShuffleDropdown, setShowShuffleDropdown] = useState(false);
+  const [showAddDropdown, setShowAddDropdown] = useState(false);
 
   const globalAudioRef = useRef<HTMLAudioElement>(null);
 
@@ -153,12 +156,48 @@ const App: React.FC = () => {
     }
   }, [user.stars, user.perfects]);
 
-  // Auto-Shop Trigger: Show shop when resources are critically low
+  // Heart Regeneration Logic: 1 Heart every 49 seconds
   useEffect(() => {
-    if (hearts < 3 && shields < 3 && !showResourceMenu) {
-      setShowResourceMenu(true);
+    if (hearts >= MAX_HEARTS) {
+      localStorage.removeItem(STORAGE_KEYS.LAST_HEART_REGEN);
+      return;
     }
-  }, [hearts, shields, showResourceMenu]);
+
+    // Initialize or get last regen time
+    const now = Date.now();
+    let lastRegen = Number(localStorage.getItem(STORAGE_KEYS.LAST_HEART_REGEN));
+    if (!lastRegen) {
+      lastRegen = now;
+      localStorage.setItem(STORAGE_KEYS.LAST_HEART_REGEN, String(now));
+    }
+
+    const REGEN_INTERVAL = 49000; // 49 seconds
+
+    const checkRegen = () => {
+      const currentTime = Date.now();
+      const elapsed = currentTime - lastRegen;
+
+      if (elapsed >= REGEN_INTERVAL) {
+        const heartsToAdd = Math.floor(elapsed / REGEN_INTERVAL);
+        setHearts(prev => {
+          const next = Math.min(MAX_HEARTS, prev + heartsToAdd);
+          return next;
+        });
+
+        // Update last regen timestamp to the "consumed" point
+        lastRegen = lastRegen + (heartsToAdd * REGEN_INTERVAL);
+        localStorage.setItem(STORAGE_KEYS.LAST_HEART_REGEN, String(lastRegen));
+      }
+    };
+
+    // Run immediately on mount/state change
+    checkRegen();
+
+    const timer = setInterval(checkRegen, 1000); // Check every second
+    return () => clearInterval(timer);
+  }, [hearts]);
+
+  // Auto-Shop Trigger: Show shop when resources are critically low
 
   const audioContextRef = useRef<AudioContext | null>(null);
 
@@ -454,7 +493,7 @@ const App: React.FC = () => {
       };
     });
 
-    setHearts(prev => Math.min(MAX_HEARTS, prev + sessionHearts + 1));
+    setHearts(prev => Math.min(MAX_HEARTS, prev + sessionHearts)); // Only add hearts earned during session
     setShields(prev => prev + sessionShields);
   };
 
@@ -542,15 +581,8 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="h-screen w-screen bg-[#0f172a] bg-gradient-to-b from-black/60 via-[#1e1b4b] to-[#0f172a] text-slate-50 flex flex-col overflow-hidden">
-      {screen !== 'game' && (
-        <Header
-          user={user}
-          currentScreen={screen as any}
-          setScreen={setScreen as any}
-          hasAnalysis={!!currentPlaylist}
-        />
-      )}
+    <div className="h-screen w-screen bg-[#0f172a] bg-[#312e81] text-slate-50 flex flex-col overflow-hidden">
+
 
       {/* Global Audio Element */}
       <audio
@@ -559,23 +591,35 @@ const App: React.FC = () => {
 
       <main className="flex-1 overflow-hidden relative">
         {isAnalyzing && (
-          <div className="fixed inset-0 bg-[#0a0a0a] z-[100] flex flex-col items-center justify-center animate-in fade-in duration-500">
-            {/* Waveform Loading Animation */}
-            <div className="flex items-center gap-1 h-32 mb-8">
-              {[...Array(10)].map((_, i) => (
-                <div
-                  key={i}
-                  className="w-2 bg-white rounded-full animate-loading-wave"
-                  style={{
-                    height: '20%',
-                    animationDelay: `${i * 0.1}s`,
-                    boxShadow: '0 0 10px rgba(255,255,255,0.5)'
-                  }}
-                ></div>
-              ))}
+          <div className="fixed inset-0 z-[400] flex items-center justify-center p-6 bg-black/80 backdrop-blur-xl animate-in fade-in duration-500">
+            <div className="w-full max-w-md bg-[#1e1b4b]/95 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] p-12 shadow-[0_22px_70px_4px_rgba(0,0,0,0.8)] flex flex-col items-center text-center animate-in zoom-in-95 fade-in duration-300">
+              {/* Waveform Loading Animation */}
+              <div className="flex items-center gap-1.5 h-24 mb-10">
+                {[...Array(12)].map((_, i) => (
+                  <div
+                    key={i}
+                    className="w-1.5 bg-white rounded-full animate-loading-wave"
+                    style={{
+                      height: '30%',
+                      animationDelay: `${i * 0.1}s`,
+                      boxShadow: '0 0 15px rgba(255,255,255,0.4)'
+                    }}
+                  ></div>
+                ))}
+              </div>
+
+              <div className="space-y-2">
+                <h3 className="text-2xl font-black italic text-white uppercase tracking-[0.2em] animate-pulse">
+                  {analysisStep}
+                </h3>
+                <div className="flex items-center justify-center gap-2">
+                  <div className="w-1 h-1 bg-blue-400 rounded-full animate-ping"></div>
+                  <p className="text-blue-200/60 text-[10px] font-black uppercase tracking-[0.4em]">
+                    GAV3NA ENGINE PROCESSING
+                  </p>
+                </div>
+              </div>
             </div>
-            <h3 className="text-4xl font-black italic text-white uppercase tracking-widest animate-pulse">{analysisStep}</h3>
-            <p className="text-slate-500 text-xs mt-2 font-bold tracking-widest">GAV3NA ENGINE PROCESSING</p>
           </div>
         )}
 
@@ -583,47 +627,24 @@ const App: React.FC = () => {
           <div className="h-full container mx-auto p-2 overflow-y-auto no-scrollbar relative">
             <div className="max-w-5xl mx-auto space-y-0 relative z-10">
               {/* Hero Section */}
-              <section className="flex items-center gap-6 p-4 md:p-6 bg-black/10 rounded-3xl mb-8">
+              <section className="flex flex-col items-center gap-2 p-4 md:p-6 bg-black/10 rounded-3xl mb-2">
 
+                {screen !== 'game' && (
+                  <Header
+                    user={user}
+                    currentScreen={screen as any}
+                    setScreen={setScreen as any}
+                    hasAnalysis={!!currentPlaylist}
+                  />
+                )}
 
                 {/* Hero Info */}
-                <div className="flex flex-col gap-4 w-full overflow-hidden mt-2">
-                  {history.length > 0 && (
-                    <h1 className="text-2xl md:text-4xl font-black italic tracking-tighter text-white drop-shadow-xl truncate leading-none">
-                      {history[0].fileName.replace(/\.[^/.]+$/, "")}
-                    </h1>
-                  )}
-
-
+                <div className="flex flex-col gap-4 w-full overflow-hidden">
                   {/* Metadata Row */}
-                  <div className="flex items-center gap-2 text-sm font-bold text-white/80 overflow-hidden whitespace-nowrap">
-                    <div className="flex items-center gap-1.5 min-w-0 shrink">
-                      <div className="w-6 h-6 rounded-full bg-purple-500/20 flex items-center justify-center border border-purple-500/30 shrink-0">
-                        <span className="text-[10px]">👤</span>
-                      </div>
-                      <span className="truncate">{user.username || "Player"}</span>
-                    </div>
-                    <span className="text-white/20">•</span>
-                    <span>Lv. {user.level}</span>
-                    <span className="text-white/20">•</span>
-                    <span>{user.songsPlayed || 0} Songs Played</span>
-                    <span className="text-white/20">•</span>
-                  </div>
 
-                  {/* Currency Bar */}
-                  <div className=" px-0 pb-2 pt-2">
-                    <CurrencyBar
-                      user={user}
-                      hearts={hearts}
-                      shields={shields}
-                      onExchange={handleExchangeCurrency}
-                      onShowShop={() => setShowResourceMenu(true)}
-                      compact={false}
-                    />
-                  </div>
 
                   {/* Actions Row */}
-                  <div className="flex items-center gap-4 mt-2">
+                  <div className="flex items-center justify-center gap-4 mt-2">
                     {/* Play Button */}
                     <button
                       onClick={() => history.length > 0 && handlePlayFromHistory(history[0])}
@@ -632,93 +653,86 @@ const App: React.FC = () => {
                       <svg className="w-6 h-6 ml-0.5 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
                     </button>
 
-                    {/* Shuffle Button (Start Game Endless/Random) */}
-                    <button
-                      onClick={() => {
-                        if (history.length > 0) {
-                          // Pick random song
-                          const random = history[Math.floor(Math.random() * history.length)];
-                          handlePlayFromHistory(random, 'endless');
-                        }
-                      }}
-                      className="p-3 rounded-full text-slate-400 hover:text-white transition-colors"
-                      title="Shuffle Play"
-                    >
-                      <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24"><path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z" /></svg>
-                    </button>
-
-                    {/* Add Song Button (+ input) */}
+                    {/* Shuffle Options Dropdown */}
+                    {/* Shuffle Toggle */}
                     <div className="relative">
                       <button
-                        onClick={() => document.getElementById('hidden-file-input')?.click()}
-                        className="w-8 h-8 rounded-full border-2 border-slate-500 text-slate-500 flex items-center justify-center hover:border-white hover:text-white transition-all"
-                        title="Add Songs"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                      </button>
-                      {/* Hidden File Input Logic from FileUploader */}
-                      <input
-                        id="hidden-file-input"
-                        type="file"
-                        accept="audio/*"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) handleFileUpload(file);
-                          e.target.value = ''; // Reset
+                        onClick={() => {
+                          setShowShuffleDropdown(true);
+                          setShowCurrencyDropdown(false);
+                          setShowAddDropdown(false);
                         }}
-                      />
+                        className={`w-12 h-12 rounded-full transition-all flex items-center justify-center ${showShuffleDropdown ? 'bg-white text-black' : 'text-blue-200/40 hover:text-white hover:bg-white/5'}`}
+                        title="Play Modes"
+                      >
+                        <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24"><path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z" /></svg>
+                      </button>
                     </div>
 
-                    {/* Settings Menu Button */}
-                    <button
-                      onClick={() => setScreen('settings')}
-                      className="p-3 text-slate-400 hover:text-white transition-colors"
-                    >
-                      <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24"><path d="M6 10c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm12 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm-6 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" /></svg>
-                    </button>
+                    {/* Currency Popup Toggle */}
+                    <div className="relative">
+                      <button
+                        onClick={() => {
+                          setShowCurrencyDropdown(true);
+                          setShowShuffleDropdown(false);
+                          setShowAddDropdown(false);
+                        }}
+                        className={`w-12 h-12 rounded-full transition-all flex items-center justify-center ${showCurrencyDropdown ? 'bg-white text-black' : 'text-blue-200/40 hover:text-white hover:bg-white/5'}`}
+                        title="Wallet & Resources"
+                      >
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                        </svg>
+                      </button>
+                    </div>
+
+                    {/* Add Song Popup Toggle */}
+                    <div className="relative">
+                      <button
+                        onClick={() => {
+                          setShowAddDropdown(true);
+                          setShowCurrencyDropdown(false);
+                          setShowShuffleDropdown(false);
+                        }}
+                        className={`w-12 h-12 rounded-full transition-all flex items-center justify-center ${showAddDropdown ? 'bg-white text-black' : 'text-blue-200/40 hover:text-white hover:bg-white/5'}`}
+                        title="Add Music"
+                      >
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                      </button>
+                    </div>
+                    {/* Hidden File Input Logic from FileUploader */}
+                    <input
+                      id="hidden-file-input"
+                      type="file"
+                      accept="audio/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleFileUpload(file);
+                        e.target.value = ''; // Reset
+                      }}
+                    />
                   </div>
 
-                  {/* Hierarchy Tabs & Search Combined */}
-                  <div className="flex items-center justify-between mt-6 px-1 ">
-                    {/* Tabs Left */}
-                    <div className="flex items-center gap-6">
-                      <button
-                        onClick={() => setActiveTab('local')}
-                        className={`text-xs font-black uppercase tracking-widest transition-all relative pb-2 ${activeTab === 'local' ? 'text-white' : 'text-slate-500 hover:text-white/60'}`}
-                      >
-                        Local
-                        {activeTab === 'local' && (
-                          <div className="absolute bottom-0 left-0 right-0 h-1 bg-green-500 rounded-full" />
-                        )}
-                      </button>
-                      <button
-                        onClick={() => setActiveTab('online')}
-                        className={`text-xs font-black uppercase tracking-widest transition-all relative pb-2 ${activeTab === 'online' ? 'text-white' : 'text-slate-500 hover:text-white/60'}`}
-                      >
-                        Online
-                        {activeTab === 'online' && (
-                          <div className="absolute bottom-0 left-0 right-0 h-1 bg-green-500 rounded-full" />
-                        )}
-                      </button>
-                    </div>
-
-                    {/* Search Right */}
-                    <div className="relative group">
+                  {/* Search Combined */}
+                  <div className="flex items-center justify-center mt-4">
+                    <div className="flex-1 max-w-md relative group">
+                      <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-green-500 transition-colors pointer-events-none">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                      </div>
                       <input
                         type="text"
-                        placeholder="SEARCH..."
+                        placeholder={`Search...${user.songsPlayed || 0} Songs Played`}
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="bg-transparent text-right text-xs font-bold text-white placeholder:text-slate-600 focus:outline-none w-24 focus:w-48 transition-all uppercase tracking-wider"
+                        className="w-full bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl py-3 pl-12 pr-4 text-sm font-bold text-white placeholder:text-blue-200/40 focus:outline-none focus:ring-2 focus:ring-green-500/50 focus:bg-white/10 transition-all uppercase tracking-wider"
                       />
-                      <div className="absolute right-0 bottom-0 h-px w-full bg-white/10 group-focus-within:bg-white/50 transition-colors"></div>
                     </div>
                   </div>
-
                 </div>
-              </section>
 
+
+              </section>
 
 
               {/* History List Header */}
@@ -726,27 +740,13 @@ const App: React.FC = () => {
 
               {/* History List at bottom */}
               <div className="px-0 pb-16">
-                {activeTab === 'online' ? (
-                  <div className="flex flex-col items-center justify-center py-20">
-                    <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mb-4">
-                      <svg className="w-8 h-8 text-white/20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                    </div>
-                    <h3 className="text-xl font-black text-white italic uppercase tracking-tighter mb-1">Coming Soon</h3>
-                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Global Network Offline</p>
-                  </div>
-                ) : (
-                  <HistoryList
-                    history={history.filter(track => {
-                      const matchesSearch = track.fileName.toLowerCase().includes(searchQuery.toLowerCase());
-                      const trackSource = track.source || 'local'; // Default to 'local' for legacy tracks
-                      return matchesSearch && trackSource === activeTab;
-                    })}
-                    onSelect={handlePlayFromHistory}
-                    onDelete={handleDeleteTrack}
-                  />
-                )}
+                <HistoryList
+                  history={history.filter(track =>
+                    track.fileName.toLowerCase().includes(searchQuery.toLowerCase())
+                  )}
+                  onSelect={handlePlayFromHistory}
+                  onDelete={handleDeleteTrack}
+                />
               </div>
             </div>
           </div >
@@ -783,6 +783,12 @@ const App: React.FC = () => {
         }
       </main >
 
+      {screen !== 'game' && (
+        <footer className="py-4 text-center">
+          <p className="text-[10px] text-blue-200/20 font-black uppercase tracking-[0.5em]">Gavena</p>
+        </footer>
+      )}
+
 
 
 
@@ -792,23 +798,205 @@ const App: React.FC = () => {
         starsGained={exchangeInfo.gained}
         cost={exchangeInfo.cost}
       />
+
+      {/* Currency Modal Popup */}
+      {showCurrencyDropdown && screen !== 'game' && (
+        <div
+          className="fixed inset-0 z-[300] flex items-center justify-center p-6 bg-black/60 backdrop-blur-md animate-in fade-in duration-300"
+          onClick={() => setShowCurrencyDropdown(false)}
+        >
+          <div
+            className="w-full max-w-md bg-[#1e1b4b]/95 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] p-8 shadow-[0_22px_70px_4px_rgba(0,0,0,0.56)] animate-in zoom-in-95 fade-in duration-300"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex flex-col items-center text-center mb-4">
+              <div className="w-12 h-12 bg-white shrink-0 rounded-xl flex items-center justify-center mb-2 shadow-xl">
+                <svg className="w-6 h-6 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                </svg>
+              </div>
+              <h3 className="text-base font-black text-white uppercase tracking-widest whitespace-nowrap">Wallet & Resources</h3>
+              <p className="text-[9px] text-blue-200/40 uppercase tracking-[0.2em] font-bold mt-1">Manage your GAV3NA assets</p>
+            </div>
+
+            <CurrencyBar
+              user={user}
+              hearts={hearts}
+              shields={shields}
+              onExchange={handleExchangeCurrency}
+              onShowShop={() => {
+                setShowResourceMenu(true);
+                setShowCurrencyDropdown(false);
+              }}
+              compact={false}
+            />
+
+            <button
+              onClick={() => setShowCurrencyDropdown(false)}
+              className="w-full mt-6 py-4 text-blue-200/60 font-bold uppercase text-[10px] tracking-widest rounded-2xl hover:text-white transition-colors border border-white/5"
+            >
+              Close Wallet
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Add Music Modal Popup */}
+      {showAddDropdown && screen !== 'game' && (
+        <div
+          className="fixed inset-0 z-[300] flex items-center justify-center p-6 bg-black/60 backdrop-blur-md animate-in fade-in duration-300"
+          onClick={() => setShowAddDropdown(false)}
+        >
+          <div
+            className="w-full max-w-md bg-[#1e1b4b]/95 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] p-8 shadow-[0_22px_70px_4px_rgba(0,0,0,0.56)] animate-in zoom-in-95 fade-in duration-300"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex flex-col items-center text-center mb-6">
+              <div className="w-16 h-16 bg-white shrink-0 rounded-2xl flex items-center justify-center mb-4 shadow-xl">
+                <svg className="w-8 h-8 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+              </div>
+              <h3 className="text-xl font-black text-white uppercase tracking-widest">Add New Music</h3>
+              <p className="text-[10px] text-blue-200/40 uppercase tracking-[0.2em] font-bold mt-1">Select your audio source</p>
+            </div>
+
+            <div className="space-y-3">
+              <button
+                onClick={() => {
+                  document.getElementById('hidden-file-input')?.click();
+                  setShowAddDropdown(false);
+                }}
+                className="w-full flex items-center justify-between p-5 bg-white/5 hover:bg-white/10 rounded-2xl transition-all text-left group border border-white/5"
+              >
+                <div className="flex flex-col">
+                  <span className="text-white font-bold text-sm">Local Device</span>
+                  <span className="text-xs text-blue-200/40">Upload from your storage</span>
+                </div>
+                <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center text-green-400 group-hover:scale-110 transition-transform">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                </div>
+              </button>
+
+              <div className="p-5 opacity-30 cursor-not-allowed flex items-center justify-between bg-white/5 rounded-2xl border border-white/5">
+                <div className="flex flex-col">
+                  <span className="text-white font-bold text-sm">Online Stream</span>
+                  <span className="text-xs text-blue-200/40">Cloud sync (Coming Soon)</span>
+                </div>
+                <div className="w-10 h-10 rounded-full bg-slate-500/20 flex items-center justify-center text-slate-400">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setShowAddDropdown(false)}
+              className="w-full mt-6 py-4 text-blue-200/60 font-bold uppercase text-[10px] tracking-widest rounded-2xl hover:text-white transition-colors border border-white/5"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Shuffle Modes Modal Popup */}
+      {showShuffleDropdown && screen !== 'game' && (
+        <div
+          className="fixed inset-0 z-[300] flex items-center justify-center p-6 bg-black/60 backdrop-blur-md animate-in fade-in duration-300"
+          onClick={() => setShowShuffleDropdown(false)}
+        >
+          <div
+            className="w-full max-w-sm bg-[#1e1b4b]/95 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] p-8 shadow-[0_22px_70px_4px_rgba(0,0,0,0.56)] animate-in zoom-in-95 fade-in duration-300"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex flex-col items-center text-center mb-6">
+              <div className="w-12 h-12 bg-white shrink-0 rounded-xl flex items-center justify-center mb-2 shadow-xl">
+                <svg className="w-6 h-6 text-black" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z" />
+                </svg>
+              </div>
+              <h3 className="text-base font-black text-white uppercase tracking-widest whitespace-nowrap">Play Modes</h3>
+              <p className="text-[9px] text-blue-200/40 uppercase tracking-[0.2em] font-bold mt-1">Select your challenge</p>
+            </div>
+
+            <div className="space-y-2">
+              <button
+                onClick={() => {
+                  if (history.length > 0) {
+                    const random = history[Math.floor(Math.random() * history.length)];
+                    handlePlayFromHistory(random, 'classic');
+                  }
+                  setShowShuffleDropdown(false);
+                }}
+                className="w-full flex items-center justify-between p-3 bg-white/5 border border-white/5 rounded-2xl hover:bg-white/10 transition-all text-left group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-400 group-hover:scale-110 transition-transform">
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[8px] font-black uppercase tracking-[.2em] text-blue-200/40">Standard Run</span>
+                    <span className="text-xs font-black text-white uppercase tracking-widest">Classic Random</span>
+                  </div>
+                </div>
+                <svg className="w-4 h-4 text-blue-200/20 group-hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+
+              <button
+                onClick={() => {
+                  if (history.length > 0) {
+                    const random = history[Math.floor(Math.random() * history.length)];
+                    handlePlayFromHistory(random, 'endless');
+                  }
+                  setShowShuffleDropdown(false);
+                }}
+                className="w-full flex items-center justify-between p-3 bg-white/5 border border-white/5 rounded-2xl hover:bg-white/10 transition-all text-left group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center text-purple-400 group-hover:scale-110 transition-transform">
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 4V1l8 5-8 5V8c-3.31 0-6 2.69-6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l-8-5 8-5v3z" /></svg>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[8px] font-black uppercase tracking-[.2em] text-blue-200/40">Survival Mode</span>
+                    <span className="text-xs font-black text-white uppercase tracking-widest">Endless Marathon</span>
+                  </div>
+                </div>
+                <svg className="w-4 h-4 text-blue-200/20 group-hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            </div>
+
+            <button
+              onClick={() => setShowShuffleDropdown(false)}
+              className="w-full mt-6 py-4 text-blue-200/40 font-bold uppercase text-[10px] tracking-[0.3em] hover:text-white transition-colors border border-white/5 rounded-2xl"
+            >
+              Cancel Selection
+            </button>
+          </div>
+        </div>
+      )}
       <ResourceShopModal
-        isOpen={showResourceMenu}
+        isOpen={showResourceMenu && screen !== 'game'}
         onClose={() => setShowResourceMenu(false)}
         user={user}
         onBuyShields={handleBuyShields}
         onWatchAd={handleWatchAd}
       />
 
-      {insufficientFunds && (
-        <InsufficientFundsModal
-          isOpen={insufficientFunds.isOpen}
-          onClose={() => setInsufficientFunds(null)}
-          currentBalance={insufficientFunds.currency === 'gold' ? (user.perfects || 0) : (user.stars || 0)}
-          requiredAmount={insufficientFunds.required}
-          currency={insufficientFunds.currency}
-        />
-      )}
+      {
+        insufficientFunds && (
+          <InsufficientFundsModal
+            isOpen={insufficientFunds.isOpen}
+            onClose={() => setInsufficientFunds(null)}
+            currentBalance={insufficientFunds.currency === 'gold' ? (user.perfects || 0) : (user.stars || 0)}
+            requiredAmount={insufficientFunds.required}
+            currency={insufficientFunds.currency}
+          />
+        )
+      }
 
       <LogoutConfirmModal
         isOpen={showLogoutConfirm}
@@ -818,7 +1006,7 @@ const App: React.FC = () => {
           handleLogout();
         }}
       />
-    </div>
+    </div >
   );
 };
 

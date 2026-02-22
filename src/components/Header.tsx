@@ -19,18 +19,18 @@ export const Header: React.FC<HeaderProps> = ({
   const closePopup = () => setActivePopup(null);
 
   return (
-    <header className="bg-transparent sticky top-0 z-50">
-      <div className="container mx-auto px-4 h-20 flex items-center justify-between ">
+    <header className="w-full">
+      <div className="flex items-center justify-between py-2">
         <div className="flex items-center gap-6">
           <div className="flex flex-col">
-            <h1 className="text-xs font-black text-slate-500 uppercase tracking-widest leading-none mb-1 flex items-center max-w-[128px]">
+            <h1 className="text-xs font-black text-blue-200/60 uppercase tracking-widest leading-none mb-1 flex items-center max-w-[128px]">
               <span className="truncate">{user.username || 'AGENT'}</span>
               <span className="text-white italic ml-2 shrink-0">LVL {user.level}</span>
             </h1>
             <div className="w-32 h-2 bg-white/5 rounded-full overflow-hidden shadow-inner ring-1 ring-white/10">
               <div className="h-full bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 transition-all duration-1000" style={{ width: `${(user.exp % 10000) / 100}%` }}></div>
             </div>
-            <p className="text-[9px] font-bold text-slate-500 tabular-nums mt-0.5 text-right w-full tracking-widest leading-none">
+            <p className="text-[9px] font-bold text-blue-200/40 tabular-nums mt-0.5 text-right w-full tracking-widest leading-none">
               {(user.exp % 10000).toLocaleString()} / 10000 EXP
             </p>
           </div>
@@ -99,7 +99,7 @@ export const Header: React.FC<HeaderProps> = ({
                       </svg>
                     </div>
                     <h3 className="text-xl font-black text-white uppercase tracking-tighter">Marketplace</h3>
-                    <p className="text-[10px] text-slate-500 uppercase tracking-[0.2em] font-bold mt-1">Acquire Resources</p>
+                    <p className="text-[10px] text-blue-200/40 uppercase tracking-[0.2em] font-bold mt-1">Acquire Resources</p>
                   </div>
 
                   <div className="space-y-3 max-h-[40vh] overflow-y-auto no-scrollbar pr-1">
@@ -130,10 +130,10 @@ export const Header: React.FC<HeaderProps> = ({
                       </svg>
                     </div>
                     <h3 className="text-xl font-black text-white uppercase tracking-tighter">Protocol Guide</h3>
-                    <p className="text-[10px] text-slate-500 uppercase tracking-[0.2em] font-bold mt-1">Mission Parameters</p>
+                    <p className="text-[10px] text-blue-200/40 uppercase tracking-[0.2em] font-bold mt-1">Mission Parameters</p>
                   </div>
 
-                  <div className="space-y-4 text-[10px] text-slate-400 uppercase tracking-widest leading-relaxed">
+                  <div className="space-y-4 text-[10px] text-blue-200/60 uppercase tracking-widest leading-relaxed">
                     <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
                       <p className="mb-2"><strong className="text-white">Hearts:</strong> Earned by completing songs. Used for revives.</p>
                       <p className="mb-2"><strong className="text-white">Shields:</strong> Your health. Exchange hearts for shields.</p>

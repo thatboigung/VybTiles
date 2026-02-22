@@ -8,7 +8,7 @@ interface ShareModalProps {
 export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose }) => {
     const [copied, setCopied] = useState(false);
     const appUrl = 'https://vybetiles.netlify.app';
-    const shareText = 'Check out Vyb Taps - An AI-powered rhythm game!';
+    const shareText = 'Check out Vibe Rush - An AI-powered rhythm game!';
 
     const handleCopyLink = async () => {
         try {
@@ -58,7 +58,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose }) => {
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[200] animate-in fade-in duration-200">
             <div className="bg-[#1a1a1a] border border-white/10 rounded-2xl max-w-md w-full p-6 animate-in zoom-in-95 duration-200">
                 <div className="flex items-center justify-between mb-6">
-                    <h3 className="text-xl font-black text-white italic uppercase tracking-tight">Share Vyb Taps</h3>
+                    <h3 className="text-xl font-black text-white italic uppercase tracking-tight">Share Vibe Rush</h3>
                     <button
                         onClick={onClose}
                         className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors"
