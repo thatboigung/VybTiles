@@ -823,7 +823,7 @@ const App: React.FC = () => {
                         placeholder={`Search Library...Good Times`}
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full bg-black/40 backdrop-blur-md border border-white/10 rounded-2xl py-4 pl-14 pr-6 text-xs font-black text-white placeholder:text-white/20 focus:outline-none focus:ring-2 focus:ring-white/20 transition-all uppercase tracking-[0.2em]"
+                        className="w-full bg-white/20 backdrop-blur-md border border-white/10 rounded-2xl py-4 pl-14 pr-6 text-xs font-black text-white placeholder:text-white/20 focus:outline-none focus:ring-2 focus:ring-white/20 transition-all uppercase tracking-[0.2em]"
                       />
                     </div>
                   </div>
