@@ -137,7 +137,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   const [expEarned, setExpEarned] = useState(0);
   const [feedback, setFeedback] = useState<{ text: string; color: string; scale: number; rotation: number } | null>(null);
   const [resumeCountdown, setResumeCountdown] = useState<number | null>(null);
-  const [ultraFocus, setUltraFocus] = useState(true);
+  const [ultraFocus, setUltraFocus] = useState(false);
 
   // Shuffle queue for endless mode
   const [shuffleQueue, setShuffleQueue] = useState<AudioAnalysis[]>([]);
