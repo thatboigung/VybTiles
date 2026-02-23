@@ -4,6 +4,7 @@ import type { AudioAnalysis, GameMode, Level } from '../types';
 
 const LANES = 4;
 const TARGET_Y_RATIO = 0.8;
+const CLASSIC_COMPLETION_THRESHOLD = 0.75;
 
 const BG_PALETTE = [
   '#1e1b4b', // Royal Indigo (Focus Base
@@ -32,7 +33,7 @@ const TutorialModal: React.FC<{ mode: string; isOpen: boolean; onClose: () => vo
   return (
     <div className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-md flex items-center justify-center p-6 text-center">
       <div className="max-w-md w-full bg-zinc-950 border border-white/10 p-8 rounded-3xl shadow-2xl">
-        <h2 className="text-3xl font-black italic text-white uppercase mb-6 tracking-tighter">How to Play: {mode.toUpperCase()}</h2>
+        <h2 className="text-3xl font-black italic text-white uppercase mb-6 tracking-tighter">How to Play: {mode === 'viberush' ? 'VIBE RUSH' : mode.toUpperCase()}</h2>
         <div className="space-y-4 text-slate-400 text-sm leading-relaxed mb-8">
           <div className="space-y-3">
             <p className="text-white font-bold text-base underline underline-offset-4">Core Rules:</p>
@@ -60,7 +61,7 @@ const TutorialModal: React.FC<{ mode: string; isOpen: boolean; onClose: () => vo
 
 interface BeatGameProps {
   playlist: AudioAnalysis[];
-  allSongs?: AudioAnalysis[]; // Full history for endless mode shuffle
+  allSongs?: AudioAnalysis[]; // Full history for Vibe Rush Mode shuffle
   onExit: () => void;
   globalHearts: number;
   globalShields: number;
@@ -85,6 +86,7 @@ interface Note {
   holdProgress?: number; // New: 0 to 1 progress of the hold
   isFullyHeld?: boolean; // New: Did the user hold it to the end
   wiggleSpeed?: number; // New: Speed of wiggle (0.5 or 1.0)
+  bpm?: number; // New: Store BPM at generation for stable lane shifting
 }
 
 interface Particle {
@@ -105,7 +107,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   playlist, allSongs, onExit, globalHearts, globalShields, userPerfects, onUseCurrency, onFinish, initialMode, onStartPlay
 }) => {
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
-  const [selectedMode, setSelectedMode] = useState<GameMode>(initialMode || (playlist.length > 1 ? 'endless' : 'classic'));
+  const [selectedMode, setSelectedMode] = useState<GameMode>(initialMode || (playlist.length > 1 ? 'viberush' : 'classic'));
   const [showTutorial, setShowTutorial] = useState(false);
   // Removed countdown state
 
@@ -139,9 +141,10 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   const [resumeCountdown, setResumeCountdown] = useState<number | null>(null);
   const [ultraFocus, setUltraFocus] = useState(false);
 
-  // Shuffle queue for endless mode
+  // Shuffle queue for Vibe Rush Mode
   const [shuffleQueue, setShuffleQueue] = useState<AudioAnalysis[]>([]);
   const [queueIndex, setQueueIndex] = useState(0);
+  const [vibeRushesCompleted, setVibeRushesCompleted] = useState(0);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -153,6 +156,11 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   const durationRef = useRef(1);
   const gameAreaRef = useRef<HTMLDivElement>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
+  const coverArtRef = useRef<HTMLImageElement | null>(null); // Current cover art for render
+  const incomingCoverArtRef = useRef<HTMLImageElement | null>(null); // Incoming art during crossfade
+  const crossfadeVisualProgressRef = useRef(1); // 0=fully old art, 1=fully new art
+  const currentSongRef = useRef<AudioAnalysis | undefined>(undefined);
+  const activeSongRef = useRef<AudioAnalysis | undefined>(undefined); // Metadata for the CURRENTLY active tiles (BPM stability)
 
   // Background transition state
   const bgRef = useRef({
@@ -166,9 +174,22 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   const isDraggingRef = useRef(false);
   const holdingNotesRef = useRef<Set<string>>(new Set()); // Track IDs of long notes being held
 
-  // Initialize shuffle queue for endless mode
+  // Crossfade & endless duration refs
+  const audioRefB = useRef<HTMLAudioElement>(null);
+  const activeAudioRef = useRef<'A' | 'B'>('A'); // Which audio element is currently playing
+  const crossfadeTimerRef = useRef<number | null>(null); // requestAnimationFrame ID for crossfade
+  const endlessSongTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // Random duration timer
+  const crossfadeInProgressRef = useRef(false);
+  const crossfadeToNextSongRef = useRef<(() => void) | null>(null); // Ref to break circular dep
+  const crossfadeTimeOffsetRef = useRef(0); // Cumulative time offset for continuous tile flow
+  const transitionGraceRef = useRef(0); // Timestamp for 2s grace period after transition
+  const rushStartTimeRef = useRef(0); // Start displayTime of the current 3-minute rush
+  const isChoiceActiveRef = useRef(false); // Whether we are currently in the "Next Rush?" decision phase
+  const rushMissCountRef = useRef(0); // Track consecutive misses during the choice phase
+
+  // Initialize shuffle queue for Vibe Rush Mode
   React.useEffect(() => {
-    if (selectedMode === 'endless' && allSongs && allSongs.length > 0) {
+    if (selectedMode === 'viberush' && allSongs && allSongs.length > 0) {
       // Ensure the first song in the playlist is at the start of the queue
       const baseTrack = playlist[0];
       const otherSongs = allSongs.filter(s => s.id !== baseTrack?.id);
@@ -179,7 +200,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     }
   }, [selectedMode, allSongs, playlist]);
 
-  const currentSong = selectedMode === 'endless' && shuffleQueue.length > 0
+  const currentSong = selectedMode === 'viberush' && shuffleQueue.length > 0
     ? shuffleQueue[queueIndex]
     : playlist[currentTrackIndex];
 
@@ -195,51 +216,244 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     }
   }, [currentSong?.coverArt]);
 
+  // Keep refs in sync for the render loop (avoids stale closure)
+  useEffect(() => {
+    // Do NOT update coverArtRef during a crossfade — the crossfade function controls it
+    if (crossfadeInProgressRef.current) return;
+    coverArtRef.current = coverArtElement;
+  }, [coverArtElement]);
+  useEffect(() => { currentSongRef.current = currentSong; }, [currentSong]);
 
-  // Auto-advance to next song in endless mode
-  const loadNextSongInEndless = React.useCallback(() => {
-    if (selectedMode !== 'endless' || !shuffleQueue.length) return;
+
+  // Pick a random duration for Vibe Rush Mode (20s to 100s, biased toward 30-60s)
+  const getRandomEndlessDuration = () => {
+    // Use a distribution that favors 30-60s
+    const ranges = [
+      { min: 20, max: 30, weight: 15 },
+      { min: 30, max: 60, weight: 50 },
+      { min: 60, max: 90, weight: 25 },
+      { min: 90, max: 100, weight: 10 },
+    ];
+    const totalWeight = ranges.reduce((s, r) => s + r.weight, 0);
+    let roll = Math.random() * totalWeight;
+    for (const range of ranges) {
+      roll -= range.weight;
+      if (roll <= 0) {
+        return range.min + Math.random() * (range.max - range.min);
+      }
+    }
+    return 40; // fallback
+  };
+
+  // Schedule next song transition timer for Vibe Rush Mode
+  const scheduleEndlessSongSwitch = useCallback(() => {
+    // Clear existing timer
+    if (endlessSongTimerRef.current !== null) {
+      clearTimeout(endlessSongTimerRef.current);
+      endlessSongTimerRef.current = null;
+    }
+    if (selectedMode !== 'viberush') return;
+
+    const duration = getRandomEndlessDuration();
+    console.log(`[Endless] Next song switch in ${duration.toFixed(1)}s`);
+    endlessSongTimerRef.current = setTimeout(() => {
+      endlessSongTimerRef.current = null;
+      // Call through ref to always get the latest version
+      crossfadeToNextSongRef.current?.();
+    }, duration * 1000);
+  }, [selectedMode]);
+
+  // Crossfade from current audio to next song
+  const crossfadeToNextSong = useCallback(() => {
+    if (selectedMode !== 'viberush' || !shuffleQueue.length || crossfadeInProgressRef.current) return;
+
+    // Clear the endless timer if it's still running
+    if (endlessSongTimerRef.current !== null) {
+      clearTimeout(endlessSongTimerRef.current);
+      endlessSongTimerRef.current = null;
+    }
 
     let nextIndex = queueIndex + 1;
-
-    // If we've exhausted the queue, reshuffle
+    let activeQueue = shuffleQueue;
     if (nextIndex >= shuffleQueue.length) {
-      const reshuffled = [...shuffleQueue].sort(() => Math.random() - 0.5);
-      setShuffleQueue(reshuffled);
+      activeQueue = [...shuffleQueue].sort(() => Math.random() - 0.5);
+      setShuffleQueue(activeQueue);
       nextIndex = 0;
     }
 
     setQueueIndex(nextIndex);
-    const nextSong = shuffleQueue[nextIndex];
+    const nextSong = activeQueue[nextIndex];
+    if (!nextSong?.fileUrl) return;
 
-    // Reset game state for new song
-    setScore(0);
-    setCombo(0);
-    setSessionHearts(0);
-    setSessionShields(0);
-    setSessionPerfects(0);
+    // Keep score, combo, gold, hearts, shields — DON'T RESET THEM!
     setIsCleared(false);
     setIsGameOver(false);
     setIsFailing(false);
-    setActiveLives(5);
-    setReviveCount(0);
-    setCompletion(0); // Reset completion for new song in endless
+    setCompletion(0);
+    setActiveLives(1);
 
-    // Reset background transition time for new song
-    bgRef.current.lastChangeTime = 0;
+    // Determine outgoing and incoming audio elements
+    const outgoing = activeAudioRef.current === 'A' ? audioRef.current : audioRefB.current;
+    const incoming = activeAudioRef.current === 'A' ? audioRefB.current : audioRef.current;
+    const newActive = activeAudioRef.current === 'A' ? 'B' : 'A';
 
-    // Load the new song
-    loadTrackNotes(nextSong);
+    if (!incoming || !outgoing) return;
 
-    // Reset and play audio
-    if (audioRef.current && nextSong.fileUrl) {
-      audioRef.current.src = nextSong.fileUrl;
-      audioRef.current.currentTime = 0;
-      audioRef.current.play();
-      setIsActive(true);
+    crossfadeInProgressRef.current = true;
+    crossfadeVisualProgressRef.current = 0;
+
+    // Preload incoming cover art directly (bypass React state pipeline)
+    if (nextSong.coverArt) {
+      const img = new Image();
+      img.src = nextSong.coverArt;
+      img.onload = () => { incomingCoverArtRef.current = img; };
+    } else {
+      incomingCoverArtRef.current = null;
     }
-  }, [selectedMode, shuffleQueue, queueIndex]);
 
+    // Prepare incoming audio (plays silently, fades in)
+    incoming.src = nextSong.fileUrl;
+    incoming.currentTime = 0;
+    incoming.volume = 0;
+    incoming.playbackRate = 1;
+    incoming.play().catch(e => console.error('Crossfade play blocked', e));
+
+    // DON'T switch active audio yet — old tiles still need old audio for timing
+    // DON'T load new notes yet — old tiles play through the crossfade
+
+    // Crossfade animation (10 seconds)
+    const fadeDuration = 10000;
+    const startTime = performance.now();
+
+    const animateCrossfade = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(1, elapsed / fadeDuration);
+
+      const eased = progress < 0.5
+        ? 2 * progress * progress
+        : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+
+      if (outgoing) outgoing.volume = Math.max(0, 1 - eased);
+      if (incoming) incoming.volume = Math.min(1, eased);
+      crossfadeVisualProgressRef.current = eased;
+
+      if (progress < 1) {
+        crossfadeTimerRef.current = requestAnimationFrame(animateCrossfade);
+      } else {
+        // === CROSSFADE COMPLETE (10s elapsed) ===
+        if (outgoing) { outgoing.pause(); outgoing.volume = 1; }
+        if (incoming) incoming.volume = 1;
+
+        const oldDisplayTime = (outgoing?.currentTime || 0) + crossfadeTimeOffsetRef.current;
+
+        crossfadeTimerRef.current = null;
+        crossfadeInProgressRef.current = false;
+        crossfadeVisualProgressRef.current = 1;
+
+        // Move incoming art to current, clear incoming
+        if (incomingCoverArtRef.current) {
+          coverArtRef.current = incomingCoverArtRef.current;
+        }
+        incomingCoverArtRef.current = null;
+
+        // NOW switch active audio and accumulate time offset precisely
+        // The new offset should make (incoming.currentTime + newOffset) === oldDisplayTime
+        const newOffset = oldDisplayTime - (incoming?.currentTime || 0);
+        crossfadeTimeOffsetRef.current = newOffset;
+        activeAudioRef.current = newActive;
+        activeSongRef.current = nextSong; // Now we switch BPM for the new song
+
+        // Start 2-second grace period (no failure for missing tiles)
+        transitionGraceRef.current = Date.now();
+
+        // After 2s gap, load the new song's tiles at the then-current display time
+        setTimeout(() => {
+          const currentDT = (incoming?.currentTime || 0) + crossfadeTimeOffsetRef.current;
+          loadTrackNotes(nextSong, crossfadeTimeOffsetRef.current, true, currentDT);
+          scheduleEndlessSongSwitch();
+        }, 2000);
+      }
+    };
+
+    if (crossfadeTimerRef.current !== null) {
+      cancelAnimationFrame(crossfadeTimerRef.current);
+    }
+    crossfadeTimerRef.current = requestAnimationFrame(animateCrossfade);
+
+    incoming.addEventListener('loadedmetadata', () => {
+      durationRef.current = incoming.duration || 1;
+    }, { once: true });
+
+    setIsActive(true);
+    if (onStartPlay) onStartPlay(nextSong);
+  }, [selectedMode, shuffleQueue, queueIndex, scheduleEndlessSongSwitch]);
+
+  // Keep the ref in sync with the latest crossfadeToNextSong
+  useEffect(() => {
+    crossfadeToNextSongRef.current = crossfadeToNextSong;
+  }, [crossfadeToNextSong]);
+
+
+  const triggerVibeRushChoiceRef = useRef<((spawnTime: number) => void) | null>(null);
+
+  const triggerVibeRushChoice = useCallback((spawnTime: number) => {
+    // INCREASE HEADROOM: Since speed is halved, we spawn further ahead
+    // 4 seconds at half speed = same visual position as 2 seconds at full speed
+    const adjustedSpawnTime = spawnTime + 2;
+
+    // 1. Spawning the "Next Rush?" title tiles (spanning 2 columns)
+    const titleTiles: Note[] = [
+      {
+        id: 'viberush-title-1',
+        time: adjustedSpawnTime,
+        lane: 1,
+        hit: false,
+        missed: false,
+        type: 'tile',
+        powerUp: 'none',
+        isLong: false,
+      },
+      {
+        id: 'viberush-title-2',
+        time: adjustedSpawnTime,
+        lane: 2,
+        hit: false,
+        missed: false,
+        type: 'tile',
+        powerUp: 'none',
+        isLong: false,
+      }
+    ];
+
+    // 2. Spawning the "Yes" and "No" decision tiles shortly after
+    const yesTile: Note = {
+      id: 'viberush-choice-yes',
+      time: adjustedSpawnTime + 1.2,
+      lane: 0,
+      hit: false,
+      missed: false,
+      type: 'tile',
+      powerUp: 'none',
+      isLong: false,
+    };
+
+    const noTile: Note = {
+      id: 'viberush-choice-no',
+      time: adjustedSpawnTime + 1.2,
+      lane: 3,
+      hit: false,
+      missed: false,
+      type: 'tile',
+      powerUp: 'none',
+      isLong: false,
+    };
+
+    notesRef.current = [...notesRef.current, ...titleTiles, yesTile, noTile];
+  }, []);
+
+  useEffect(() => {
+    triggerVibeRushChoiceRef.current = triggerVibeRushChoice;
+  }, [triggerVibeRushChoice]);
 
 
   const spawnParticles = (x: number, y: number, color: string, count: number) => {
@@ -272,6 +486,17 @@ export const BeatGame: React.FC<BeatGameProps> = ({
       if (next <= 0) {
         setIsFailing(true);
 
+        // Clear endless timers on failure
+        if (endlessSongTimerRef.current !== null) {
+          clearTimeout(endlessSongTimerRef.current);
+          endlessSongTimerRef.current = null;
+        }
+        if (crossfadeTimerRef.current !== null) {
+          cancelAnimationFrame(crossfadeTimerRef.current);
+          crossfadeTimerRef.current = null;
+        }
+        crossfadeInProgressRef.current = false;
+
         // Calculate Completion based on Song Progress on Failure
         if (durationRef.current > 0) {
           const progress = (currentTimeRef.current / durationRef.current) * 100;
@@ -279,12 +504,27 @@ export const BeatGame: React.FC<BeatGameProps> = ({
         }
 
         // Calculate Partial EXP
-        // Standard formula: Score / 100
-        const earned = Math.floor(score / 100);
+        const baseExp = 100 + (sessionPerfects * 5);
+        const scoreExp = Math.floor(score / 100);
+        const earned = baseExp + scoreExp;
         setExpEarned(earned);
 
-        if (audioRef.current) {
-          const audio = audioRef.current;
+        // Add 20 Stars per completed VibeRush
+        const rushStars = vibeRushesCompleted * 20;
+        setSessionPerfects(p => p + rushStars);
+
+        // Get the currently active audio element for slowdown
+        const activeAudio = activeAudioRef.current === 'A' ? audioRef.current : audioRefB.current;
+        const inactiveAudio = activeAudioRef.current === 'A' ? audioRefB.current : audioRef.current;
+
+        // Stop inactive audio immediately (if crossfading)
+        if (inactiveAudio && !inactiveAudio.paused) {
+          inactiveAudio.pause();
+          inactiveAudio.volume = 1;
+        }
+
+        if (activeAudio) {
+          const audio = activeAudio;
           // Disable pitch preservation to get the "deepening" vinyl stop effect
           if ('preservesPitch' in audio) {
             (audio as any).preservesPitch = false;
@@ -304,14 +544,12 @@ export const BeatGame: React.FC<BeatGameProps> = ({
               const progress = elapsed / duration;
               // Ease out cubic for a natural feel
               const newRate = Math.max(0, startRate * (1 - progress));
-              if (audioRef.current) audioRef.current.playbackRate = newRate;
+              audio.playbackRate = newRate;
               audioEffectRef.current = requestAnimationFrame(slowdown);
             } else {
-              if (audioRef.current) {
-                audioRef.current.pause();
-                audioRef.current.playbackRate = 1;
-                (audioRef.current as any).preservesPitch = true;
-              }
+              audio.pause();
+              audio.playbackRate = 1;
+              (audio as any).preservesPitch = true;
               audioEffectRef.current = null;
             }
           };
@@ -354,7 +592,8 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
   const handleHit = useCallback((lane: number, tapY?: number) => {
     if (!isActive || isPaused || isGameOver || isCleared) return;
-    const t = audioRef.current?.currentTime || 0;
+    const activeAudio = activeAudioRef.current === 'A' ? audioRef.current : audioRefB.current;
+    const t = (activeAudio?.currentTime || 0) + crossfadeTimeOffsetRef.current;
 
     setLaneHits(prev => {
       const next = [...prev];
@@ -378,7 +617,8 @@ export const BeatGame: React.FC<BeatGameProps> = ({
       // Logic for "Tap anywhere": find note whose current Y is closest to tapY
       let minDiff = 150; // 150px tolerance
       candidates.forEach(n => {
-        const nY = targetY - ((n.time - t) * speed);
+        const effectiveSpeed = n.id.startsWith('viberush') ? speed * 0.5 : speed;
+        const nY = targetY - ((n.time - t) * effectiveSpeed);
         const diff = Math.abs(nY - tapY);
         if (diff < minDiff) {
           minDiff = diff;
@@ -396,6 +636,39 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
     const noteToHit = closestNote as Note | null;
     if (noteToHit) {
+      // Handle VibeRush Decision Tiles
+      if (noteToHit.id === 'viberush-choice-yes') {
+        noteToHit.hit = true;
+        setVibeRushesCompleted(prev => prev + 1);
+        rushStartTimeRef.current = t; // Reset for next 3 minutes
+        isChoiceActiveRef.current = false;
+        rushMissCountRef.current = 0; // Reset misses
+
+        // Restore playback speed if it was slowed down
+        const activeAudio = activeAudioRef.current === 'A' ? audioRef.current : audioRefB.current;
+        if (activeAudio) activeAudio.playbackRate = 1.0;
+
+        // Resume note generation immediately
+        if (currentSongRef.current) {
+          loadTrackNotes(currentSongRef.current, crossfadeTimeOffsetRef.current, true, t);
+        }
+        setCompletion(0);
+        if (progressBarRef.current) progressBarRef.current.style.width = '0%';
+        showFeedback('VIBE RUSH!', 'text-yellow-400', 1.5);
+        const effectiveSpeed = noteToHit.id.startsWith('viberush') ? speed * 0.5 : speed;
+        spawnParticles(x, targetY - ((noteToHit.time - t) * effectiveSpeed), '#facc15', 50);
+        return;
+      }
+      if (noteToHit.id === 'viberush-choice-no') {
+        noteToHit.hit = true;
+        handleSuccess();
+        return;
+      }
+      if (noteToHit.id.startsWith('viberush-title')) {
+        // Title tiles are decorative/indicators, don't block interaction but maybe no-op
+        return;
+      }
+
       noteToHit.hit = true;
       noteToHit.hitTimestamp = Date.now(); // Record hit time
       const nY = targetY - ((noteToHit.time - t) * speed);
@@ -445,11 +718,12 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     }
   }, [isActive, isPaused, isGameOver, isCleared, combo, selectedMode, handleFailure, selectedLevel]);
 
-  const loadTrackNotes = (analysis: AudioAnalysis) => {
+  const loadTrackNotes = (analysis: AudioAnalysis, timeOffset: number = 0, append: boolean = false, currentDisplayTime: number = 0) => {
+    if (isChoiceActiveRef.current) return; // DON'T load regular notes during choice
     let excludeUntil = 0;
     const lastLaneTimes = new Array(LANES).fill(-1); // TRACK LAST SPAWN TIME IN EACH LANE
 
-    notesRef.current = analysis.beats.flatMap((beatTime, index) => {
+    const newNotes = analysis.beats.flatMap((beatTime, index) => {
       // Skip if this beat falls within a long tile's "exclusive" period
       if (beatTime < excludeUntil) return [];
 
@@ -505,7 +779,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
       const notes: Note[] = [{
         id: `${analysis.id}-n-${index}-a`,
-        time: beatTime,
+        time: beatTime + timeOffset,
         lane: lane1,
         hit: false,
         missed: false,
@@ -516,7 +790,8 @@ export const BeatGame: React.FC<BeatGameProps> = ({
         isLong,
         duration,
         holdProgress: 0,
-        wiggleSpeed: Math.random() < 0.5 ? 0.5 : 1.0
+        wiggleSpeed: Math.random() < 0.5 ? 0.5 : 1.0,
+        bpm: analysis.bpm
       }];
 
       // Skip double tiles if it's a long tile
@@ -549,7 +824,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
           notes.push({
             id: `${analysis.id}-n-${index}-b`,
-            time: nextBeatTime,
+            time: nextBeatTime + timeOffset,
             lane: lane2,
             hit: false,
             missed: false,
@@ -557,7 +832,8 @@ export const BeatGame: React.FC<BeatGameProps> = ({
             powerUp: 'none',
             isLong: isLong2,
             duration: duration2,
-            holdProgress: 0
+            holdProgress: 0,
+            bpm: analysis.bpm
           });
 
           lastLaneTimes[lane2] = nextBeatTime + (isLong2 ? duration2 : 0);
@@ -566,6 +842,21 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
       return notes;
     });
+
+    const filteredNewNotes = newNotes.filter(n => n.time > currentDisplayTime + 0.5);
+
+    if (append) {
+      // Keep only old notes within 2s ahead of current time — discard future notes
+      // from old song to prevent double/stacked tiles with new song
+      const keepOld = notesRef.current.filter(n => {
+        if (n.hit) return true; // Always keep hit notes (for long-hold rendering)
+        if (n.missed) return false; // Drop missed notes
+        return n.time <= currentDisplayTime + 2; // Only keep notes near current time
+      });
+      notesRef.current = [...keepOld, ...filteredNewNotes];
+    } else {
+      notesRef.current = filteredNewNotes;
+    }
   };
 
   const handleCloseTutorial = () => {
@@ -577,7 +868,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   const livesMap: Record<Level, number> = { easy: 2, medium: 1, hard: 0 };
 
   const checkCanAfford = () => {
-    const shieldCost = selectedMode === 'endless' ? 1 : livesMap[selectedLevel];
+    const shieldCost = selectedMode === 'viberush' ? 1 : livesMap[selectedLevel];
     return {
       canAfford: globalHearts >= 2 && globalShields >= shieldCost,
       shieldCost
@@ -585,7 +876,8 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   };
 
   const rampAudioToSpeed = useCallback((targetSpeed: number = 1.0, duration: number = 3000) => {
-    if (!audioRef.current) return;
+    const activeAudio = activeAudioRef.current === 'A' ? audioRef.current : audioRefB.current;
+    if (!activeAudio) return;
 
     // Cancel any active effect
     if (audioEffectRef.current !== null) {
@@ -593,7 +885,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
       audioEffectRef.current = null;
     }
 
-    const audio = audioRef.current;
+    const audio = activeAudio;
 
     // Start slow
     const startRate = 0.2;
@@ -630,17 +922,45 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     const { shieldCost } = checkCanAfford();
     onUseCurrency(2, shieldCost, 0);
 
-    setActiveLives(selectedMode === 'endless' ? 1 : livesMap[selectedLevel]);
+    setActiveLives(selectedMode === 'viberush' ? 1 : livesMap[selectedLevel]);
 
-    const startSong = selectedMode === 'endless' && shuffleQueue.length > 0 ? shuffleQueue[0] : playlist[0];
-    if (selectedMode === 'endless') setQueueIndex(0);
+    const startSong = selectedMode === 'viberush' && shuffleQueue.length > 0 ? shuffleQueue[0] : playlist[0];
+    if (selectedMode === 'viberush') setQueueIndex(0);
     else setCurrentTrackIndex(0);
+
+    // Reset crossfade state
+    activeAudioRef.current = 'A';
+    crossfadeInProgressRef.current = false;
+    crossfadeTimeOffsetRef.current = 0; // Reset time offset for fresh game
+    activeSongRef.current = startSong; // Initialize active metadata
+    if (crossfadeTimerRef.current !== null) {
+      cancelAnimationFrame(crossfadeTimerRef.current);
+      crossfadeTimerRef.current = null;
+    }
+    if (endlessSongTimerRef.current !== null) {
+      clearTimeout(endlessSongTimerRef.current);
+      endlessSongTimerRef.current = null;
+    }
+    // Stop audio B if it was playing
+    if (audioRefB.current) {
+      audioRefB.current.pause();
+      audioRefB.current.volume = 1;
+    }
 
     loadTrackNotes(startSong);
     particlesRef.current = [];
 
     setScore(0); setCombo(0); setSessionHearts(0); setSessionShields(0); setSessionPerfects(0); setPlayerLane(1);
     setCompletion(0); // Reset completion on game start
+    setVibeRushesCompleted(0);
+    rushStartTimeRef.current = 0;
+    isChoiceActiveRef.current = false;
+    rushMissCountRef.current = 0;
+
+    // Restore playback speed
+    const activeAudio = activeAudioRef.current === 'A' ? audioRef.current : audioRefB.current;
+    if (activeAudio) activeAudio.playbackRate = 1.0;
+
     setIsActive(true); setIsPaused(false); setIsGameOver(false); setIsCleared(false); setInvincible(false);
 
     // Reset background transition time
@@ -650,7 +970,13 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     if (audioRef.current) {
       audioRef.current.src = startSong.fileUrl || '';
       audioRef.current.currentTime = 0;
+      audioRef.current.volume = 1;
       rampAudioToSpeed(1.0, 3000);
+    }
+
+    // Schedule first random song switch for Vibe Rush Mode
+    if (selectedMode === 'viberush') {
+      scheduleEndlessSongSwitch();
     }
 
     // Notify parent that playback has truly begun
@@ -674,9 +1000,13 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   };
 
   const handleFinish = () => {
-    if (selectedMode === 'endless') {
-      loadNextSongInEndless();
-      showFeedback('BEAT EXTENDED', 'text-blue-400', 1.2);
+    if (selectedMode === 'viberush') {
+      // Song ended naturally before the random timer — still crossfade to next
+      if (endlessSongTimerRef.current !== null) {
+        clearTimeout(endlessSongTimerRef.current);
+        endlessSongTimerRef.current = null;
+      }
+      crossfadeToNextSong();
     } else {
       // Guard: Don't mark as cleared or 100% if we already failed
       if (isGameOver || isFailing) return;
@@ -684,19 +1014,62 @@ export const BeatGame: React.FC<BeatGameProps> = ({
       // EXP Formula: Base 300 + Performance
       const earned = 300 + (sessionPerfects * 10);
       setExpEarned(earned);
+
+      // Add 20 Stars per completed VibeRush
+      const rushStars = vibeRushesCompleted * 20;
+      setSessionPerfects(p => p + rushStars);
+
       setIsCleared(true);
-      if (audioRef.current) audioRef.current.pause();
+      const activeAudio = activeAudioRef.current === 'A' ? audioRef.current : audioRefB.current;
+      if (activeAudio) activeAudio.pause();
+      // Also pause inactive audio (if crossfading)
+      const inactiveAudio = activeAudioRef.current === 'A' ? audioRefB.current : audioRef.current;
+      if (inactiveAudio && !inactiveAudio.paused) inactiveAudio.pause();
 
       // Calculate Completion based on Song Progress (Time Elapsed)
       // On finish, it's 100%
       setCompletion(100);
-
     }
   };
+
+  const handleSuccess = useCallback(() => {
+    // End game as successful (used for Choice: NO)
+    setIsActive(false);
+
+    // Add 20 Stars per completed VibeRush 
+    // (Note: handleFinish also handles this, but let's be explicit for Choice: NO)
+    const rushStars = vibeRushesCompleted * 20;
+    setSessionPerfects(p => p + rushStars);
+
+    // Performance EXP
+    const earned = 500 + (sessionPerfects * 15);
+    setExpEarned(earned);
+
+    setCompletion(100);
+    setIsCleared(true);
+
+    const activeAudio = activeAudioRef.current === 'A' ? audioRef.current : audioRefB.current;
+    if (activeAudio) activeAudio.pause();
+    const inactiveAudio = activeAudioRef.current === 'A' ? audioRefB.current : audioRef.current;
+    if (inactiveAudio) inactiveAudio.pause();
+  }, [sessionPerfects, vibeRushesCompleted]);
 
 
 
   const handleAbort = () => {
+    // Clean up all crossfade / endless timers
+    if (endlessSongTimerRef.current !== null) {
+      clearTimeout(endlessSongTimerRef.current);
+      endlessSongTimerRef.current = null;
+    }
+    if (crossfadeTimerRef.current !== null) {
+      cancelAnimationFrame(crossfadeTimerRef.current);
+      crossfadeTimerRef.current = null;
+    }
+    if (audioRefB.current) { audioRefB.current.pause(); audioRefB.current.volume = 1; }
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current.volume = 1; }
+    crossfadeInProgressRef.current = false;
+
     setIsExiting(true);
     setTimeout(onExit, 200);
   };
@@ -757,9 +1130,10 @@ export const BeatGame: React.FC<BeatGameProps> = ({
       // Countdown finished
       setIsPaused(false);
       setResumeCountdown(null);
-      if (audioRef.current) {
-        audioRef.current.playbackRate = 1.0; // Ensure speed is reset to normal
-        audioRef.current.play();
+      const activeAudio = activeAudioRef.current === 'A' ? audioRef.current : audioRefB.current;
+      if (activeAudio) {
+        activeAudio.playbackRate = 1.0; // Ensure speed is reset to normal
+        activeAudio.play();
       }
     }
   }, [resumeCountdown]);
@@ -776,13 +1150,32 @@ export const BeatGame: React.FC<BeatGameProps> = ({
       cancelAnimationFrame(audioEffectRef.current);
       audioEffectRef.current = null;
     }
-    // Force reset audio props immediately
+    // Clean up crossfade / endless timers
+    if (endlessSongTimerRef.current !== null) {
+      clearTimeout(endlessSongTimerRef.current);
+      endlessSongTimerRef.current = null;
+    }
+    if (crossfadeTimerRef.current !== null) {
+      cancelAnimationFrame(crossfadeTimerRef.current);
+      crossfadeTimerRef.current = null;
+    }
+    crossfadeInProgressRef.current = false;
+
+    // Force reset both audio elements
     if (audioRef.current) {
-      audioRef.current.pause(); // Ensure it's paused
+      audioRef.current.pause();
       audioRef.current.playbackRate = 1;
-      audioRef.current.currentTime = 0; // Reset time immediately
+      audioRef.current.currentTime = 0;
+      audioRef.current.volume = 1;
       (audioRef.current as any).preservesPitch = true;
     }
+    if (audioRefB.current) {
+      audioRefB.current.pause();
+      audioRefB.current.playbackRate = 1;
+      audioRefB.current.currentTime = 0;
+      audioRefB.current.volume = 1;
+    }
+    activeAudioRef.current = 'A';
 
     // Clear notes/particles immediately so we don't render old frame during countdown
     notesRef.current = [];
@@ -826,13 +1219,47 @@ export const BeatGame: React.FC<BeatGameProps> = ({
         return;
       }
 
-      const t = audioRef.current?.currentTime || 0;
+      const activeAudio = activeAudioRef.current === 'A' ? audioRef.current : audioRefB.current;
+      const t = activeAudio?.currentTime || 0;
+      // Add accumulated time offset for continuous tile flow across song transitions
+      const offsetT = t + crossfadeTimeOffsetRef.current;
       // Freeze time visually if failing
       if (!isFailing) {
-        currentTimeRef.current = t;
+        currentTimeRef.current = offsetT;
       }
-      const displayTime = isFailing ? currentTimeRef.current : t;
-      const progress = displayTime / (durationRef.current || 1);
+      const displayTime = isFailing ? currentTimeRef.current : offsetT;
+      let progress = 0;
+
+      if (selectedMode === 'viberush') {
+        const rushElapsed = displayTime - rushStartTimeRef.current;
+        progress = Math.max(0, Math.min(1, rushElapsed / 180));
+        setCompletion(Math.floor(progress * 100));
+
+        // TRIGGER VIBE RUSH CHOICE phase
+        if (progress >= 1 && !isChoiceActiveRef.current) {
+          isChoiceActiveRef.current = true;
+          // Spawn choice tiles slightly ahead of current time
+          triggerVibeRushChoiceRef.current?.(displayTime + 2);
+        }
+      } else {
+        // CLASSIC MODE: Complete at 75%
+        const rawProgress = displayTime / (durationRef.current || 1);
+        progress = Math.min(1, rawProgress / CLASSIC_COMPLETION_THRESHOLD);
+        setCompletion(Math.floor(progress * 100));
+
+        if (progress >= 1 && !isCleared && !isGameOver) {
+          handleSuccess();
+          showFeedback('CLASSIC COMPLETE!', 'text-green-400', 1.5);
+          return;
+        }
+      }
+
+      // Periodically clean up old notes that have scrolled past (every ~60 frames)
+      if (selectedMode === 'viberush' && Math.random() < 0.02) {
+        notesRef.current = notesRef.current.filter(n =>
+          displayTime - n.time < 5 || (!n.missed && !n.hit)
+        );
+      }
 
       if (progressBarRef.current) {
         progressBarRef.current.style.width = `${progress * 100}%`;
@@ -844,25 +1271,31 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
       ctx.clearRect(0, 0, w, h);
 
-      // Draw Cover Art Background (Cover Scale)
-      if (coverArtElement) {
-        const img = coverArtElement;
+      // Draw Cover Art Background (Cover Scale) — with crossfade between old and new
+      const drawCoverArt = (img: HTMLImageElement, alpha: number) => {
         const imgRatio = img.width / img.height;
         const canvasRatio = w / h;
         let dW, dH, dX, dY;
-
         if (canvasRatio > imgRatio) {
-          dW = w;
-          dH = w / imgRatio;
-          dX = 0;
-          dY = (h - dH) / 2;
+          dW = w; dH = w / imgRatio; dX = 0; dY = (h - dH) / 2;
         } else {
-          dH = h;
-          dW = h * imgRatio;
-          dX = (w - dW) / 2;
-          dY = 0;
+          dH = h; dW = h * imgRatio; dX = (w - dW) / 2; dY = 0;
         }
+        ctx.globalAlpha = alpha;
         ctx.drawImage(img, dX, dY, dW, dH);
+        ctx.globalAlpha = 1.0;
+      };
+
+      // Use crossfade visual progress synced with audio crossfade
+      const vp = crossfadeVisualProgressRef.current;
+
+      // Draw current cover art (old art fading out during crossfade)
+      if (coverArtRef.current) {
+        drawCoverArt(coverArtRef.current, vp < 1 ? (1 - vp) : 1);
+      }
+      // Draw incoming cover art (new art fading in during crossfade)
+      if (incomingCoverArtRef.current && vp < 1) {
+        drawCoverArt(incomingCoverArtRef.current, vp);
       }
 
       // Update Background State
@@ -880,7 +1313,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
       const activeBgColor = lerpColor(bgRef.current.prevColor, bgRef.current.currColor, bgT);
 
       // Overlay shifting color with semi-transparency
-      if (coverArtElement) {
+      if (coverArtRef.current || incomingCoverArtRef.current) {
         ctx.globalAlpha = 0.50; // Increased background visibility
       }
       ctx.fillStyle = activeBgColor;
@@ -918,11 +1351,15 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
       const speed = getNoteSpeed();
 
-      const visibleRangeSeconds = (h / speed) + 1;
-
       // Render Connectors for simultaneous tiles (Double Tiles)
       // Group by time
-      const visibleNotes = notesRef.current.filter(n => !n.hit && !n.missed && (n.time - displayTime) <= visibleRangeSeconds && (n.time - displayTime) >= -0.15);
+      const visibleNotes = notesRef.current.filter(n => {
+        if (n.hit || n.missed) return false;
+        const effSpeed = n.id.startsWith('viberush') ? speed * 0.5 : speed;
+        const range = (h / effSpeed) + 1;
+        const tDiff = n.time - displayTime;
+        return tDiff <= range && tDiff >= -0.15;
+      });
       const timeGroups = new Map<number, Note[]>();
       visibleNotes.forEach(n => {
         if (!timeGroups.has(n.time)) timeGroups.set(n.time, []);
@@ -931,7 +1368,8 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
       timeGroups.forEach((group) => {
         if (group.length > 1) {
-          const y = targetY - ((group[0].time - displayTime) * speed);
+          const effSpeed = group[0].id.startsWith('viberush') ? speed * 0.5 : speed;
+          const y = targetY - ((group[0].time - displayTime) * effSpeed);
           if (y > -200 && y < h + 200) {
             // Find min and max x
             let minX = w, maxX = 0;
@@ -956,18 +1394,19 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
       // The `now` variable is already defined above, so we don't redefine it.
       notesRef.current.forEach((note) => {
-        // Handle Moving Tiles Logic
         if (note.isMoving && !note.hit && !note.missed && note.originalLane !== undefined) {
           // Switch lanes every 2 beats (Half BPM)
           // Period = 2 * (60 / BPM)
-          const bpm = currentSong?.bpm || 120;
-          const beatDuration = 60 / bpm;
+          // Use the BPM stored on the note for stability
+          const noteBpm = note.bpm || activeSongRef.current?.bpm || 120;
+          const beatDuration = 60 / noteBpm;
           const switchPeriod = beatDuration * 2;
 
           // Calculate vertical position Y to check if we should still move
           // We need to calculate Y same as below
           const timeToHit = note.time - displayTime;
-          const yPos = targetY - (timeToHit * speed);
+          const effSpeed = note.id.startsWith('viberush') ? speed * 0.5 : speed;
+          const yPos = targetY - (timeToHit * effSpeed);
 
           // Stop moving if we are past the middle of the screen (0.5 * h)
           // This gives the user time to react
@@ -992,9 +1431,12 @@ export const BeatGame: React.FC<BeatGameProps> = ({
           if (partner && partner.hit && partner.hitTimestamp) {
             if (now - partner.hitTimestamp > 300) {
               note.missed = true;
-              setScore(s => Math.max(0, s - 300));
-              handleFailure(note.id);
-              showFeedback('BEAT MISSED', 'text-red-500', 1.0);
+              // Skip failure during 2s grace period after song transition
+              if (Date.now() - transitionGraceRef.current > 2000) {
+                setScore(s => Math.max(0, s - 300));
+                handleFailure(note.id);
+                showFeedback('BEAT MISSED', 'text-red-500', 1.0);
+              }
               return;
             }
           }
@@ -1004,25 +1446,70 @@ export const BeatGame: React.FC<BeatGameProps> = ({
         if (note.hit && note.isLong && note.isFullyHeld) return;
 
         const timeDiff = note.time - displayTime;
-        if (timeDiff > visibleRangeSeconds) return;
+        const effSpeed = note.id.startsWith('viberush') ? speed * 0.5 : speed;
+        const range = (h / effSpeed) + 1;
+        if (timeDiff > range) return;
         if (timeDiff < -0.15 && !isFailing) { // Reduced threshold for missing tiles
           if (!note.hit && !note.missed) {
+            // VIBERUSH PERSISTENCE: If missed a choice or title, respawn it!
+            if (isChoiceActiveRef.current && note.id.startsWith('viberush')) {
+              // Only increment on ONE tile per wave to avoid triple/quadruple counting
+              if (note.id === 'viberush-choice-yes') {
+                rushMissCountRef.current++;
+              }
+
+              // 2nd Miss: SLOW DOWN (0.5x)
+              if (rushMissCountRef.current === 2) {
+                const activeAudio = activeAudioRef.current === 'A' ? audioRef.current : audioRefB.current;
+                if (activeAudio) activeAudio.playbackRate = 0.5;
+                showFeedback('FOCUS! SLOWING DOWN...', 'text-yellow-400', 2.0);
+              }
+
+              // 3rd Miss: AUTO-SUCCESS (Game Completed)
+              if (rushMissCountRef.current >= 3) {
+                isChoiceActiveRef.current = false;
+                rushMissCountRef.current = 0;
+                const activeAudio = activeAudioRef.current === 'A' ? audioRef.current : audioRefB.current;
+                if (activeAudio) activeAudio.playbackRate = 1.0;
+                handleSuccess();
+                showFeedback('SESSION COMPLETE!', 'text-green-400', 2.0);
+                return;
+              }
+
+              // Slower fall means we need to respawn further ahead
+              note.time = displayTime + 4.0;
+              return; // Don't mark as missed
+            }
+
             note.missed = true;
-            setScore(s => Math.max(0, s - 500)); // Penalty for skipping
-            setCombo(0);
-            handleFailure(note.id);
-            showFeedback('MISS', 'text-red-500', 1.0);
+            // Skip failure during 2s grace period after song transition
+            if (Date.now() - transitionGraceRef.current > 2000) {
+              setScore(s => Math.max(0, s - 500)); // Penalty for skipping
+              setCombo(0);
+              handleFailure(note.id);
+              showFeedback('MISS', 'text-red-500', 1.0);
+            }
           }
           // Only return if it's NOT a long tile being held/processed
           if (!note.isLong || !note.hit) return;
         }
 
         // Lock Y to targetY if note is hit but still active (long tile)
-        const y = (note.hit && note.isLong) ? targetY : targetY - (timeDiff * speed);
+        const effectiveSpeed = note.id.startsWith('viberush') ? speed * 0.5 : speed;
+        const y = (note.hit && note.isLong) ? targetY : targetY - (timeDiff * effectiveSpeed);
 
         if (y > -200 && y < h + 200) {
           const x = (note.lane * lW) + (lW / 2);
-          const nW = lW * 0.92, nH = 150;
+          let nW = lW * 0.92, nH = 150;
+
+          // BPM-Synced Bouncing for VibeRush tiles
+          if (note.id.startsWith('viberush')) {
+            const bpm = activeSongRef.current?.bpm || 120;
+            const bouncePeriod = (60 / bpm) * 2000; // Period for half BPM in ms (2 beats)
+            const bounceScale = 1 + 0.1 * Math.abs(Math.sin((Date.now() % bouncePeriod) * (Math.PI / bouncePeriod)));
+            nW *= bounceScale;
+            nH *= bounceScale;
+          }
 
           // Draw Tail for Long Tiles
           if (note.isLong && note.duration) {
@@ -1120,7 +1607,11 @@ export const BeatGame: React.FC<BeatGameProps> = ({
             const flash = Math.sin(Date.now() / 50); // Fast blink
             ctx.fillStyle = flash > 0 ? '#ff0000' : '#ffffff';
           } else if (note.type === 'tile') {
-            // No shadow/glow
+            // No shadow/glow by default
+            if (note.id.startsWith('viberush')) {
+              ctx.shadowColor = '#facc15';
+              ctx.shadowBlur = 25;
+            }
           }
 
           ctx.beginPath();
@@ -1147,8 +1638,23 @@ export const BeatGame: React.FC<BeatGameProps> = ({
             ctx.roundRect(xOffset, yOffset, nW, nH, cornerRadius);
             ctx.clip();
 
-            if (coverArtElement) {
-              ctx.drawImage(coverArtElement, xOffset, yOffset, nW, nH);
+            // Crossfade tile art between old and new cover during transitions
+            const tileVP = crossfadeVisualProgressRef.current;
+            const hasIncoming = incomingCoverArtRef.current && tileVP < 1;
+            const hasCurr = coverArtRef.current;
+
+            if (hasIncoming || hasCurr) {
+              // Draw current/old cover art (fading out during crossfade)
+              if (hasCurr && coverArtRef.current) {
+                ctx.globalAlpha = tileVP < 1 ? (1 - tileVP) : 1;
+                ctx.drawImage(coverArtRef.current, xOffset, yOffset, nW, nH);
+              }
+              // Draw incoming/new cover art (fading in during crossfade)
+              if (hasIncoming && incomingCoverArtRef.current) {
+                ctx.globalAlpha = tileVP;
+                ctx.drawImage(incomingCoverArtRef.current, xOffset, yOffset, nW, nH);
+              }
+              ctx.globalAlpha = 1.0;
               // Face Lighting (Subtle top-down light)
               const faceGrad = ctx.createLinearGradient(x, yOffset, x, yOffset + nH);
               faceGrad.addColorStop(0, 'rgba(255, 255, 255, 0.15)'); // Top light
@@ -1156,6 +1662,28 @@ export const BeatGame: React.FC<BeatGameProps> = ({
               faceGrad.addColorStop(1, 'rgba(0, 0, 0, 0.25)');       // Bottom depth shadow
               ctx.fillStyle = faceGrad;
               ctx.fillRect(xOffset, yOffset, nW, nH);
+
+              // CUSTOM VIBERUSH RENDERING
+              if (note.id.startsWith('viberush')) {
+                ctx.save();
+                // Darken/Overlay to make text pop
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+                ctx.fillRect(xOffset, yOffset, nW, nH);
+
+                ctx.fillStyle = '#fff';
+                ctx.font = '900 italic 20px Inter, system-ui, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+
+                let label = '';
+                if (note.id === 'viberush-title-1') label = 'NEXT';
+                if (note.id === 'viberush-title-2') label = 'RUSH?';
+                if (note.id === 'viberush-choice-yes') label = 'YES';
+                if (note.id === 'viberush-choice-no') label = 'NO';
+
+                ctx.fillText(label, xOffset + nW / 2, yOffset + nH / 2);
+                ctx.restore();
+              }
             } else {
               // Fallback if no cover art
               const baseColor = note.type === 'tile' ? '#4f46e5' : '#22c55e';
@@ -1216,23 +1744,30 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     return () => cancelAnimationFrame(requestRef.current!);
   }, [isActive, isPaused, isGameOver, isCleared, playerLane, selectedMode, invincible, shake, selectedLevel, laneHits]);
 
-  // Listen for audio ended event to auto-advance in endless mode
+  // Listen for audio ended event to auto-advance in Vibe Rush Mode (both audio elements)
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
+    const audioA = audioRef.current;
+    const audioB = audioRefB.current;
 
-    const handleAudioEnded = () => {
-      if (selectedMode === 'endless') {
-        // Small delay for smooth transition
-        setTimeout(() => {
-          loadNextSongInEndless();
-        }, 500);
+    const handleAudioEndedOnActive = (endedElement: HTMLAudioElement) => {
+      // Only trigger if this is the currently active audio
+      const isActiveA = activeAudioRef.current === 'A' && endedElement === audioA;
+      const isActiveB = activeAudioRef.current === 'B' && endedElement === audioB;
+      if ((isActiveA || isActiveB) && selectedMode === 'viberush') {
+        crossfadeToNextSong();
       }
     };
 
-    audio.addEventListener('ended', handleAudioEnded);
-    return () => audio.removeEventListener('ended', handleAudioEnded);
-  }, [selectedMode, loadNextSongInEndless]);
+    const onEndedA = () => audioA && handleAudioEndedOnActive(audioA);
+    const onEndedB = () => audioB && handleAudioEndedOnActive(audioB);
+
+    audioA?.addEventListener('ended', onEndedA);
+    audioB?.addEventListener('ended', onEndedB);
+    return () => {
+      audioA?.removeEventListener('ended', onEndedA);
+      audioB?.removeEventListener('ended', onEndedB);
+    };
+  }, [selectedMode, crossfadeToNextSong]);
 
 
   // Keyboard Controls
@@ -1370,18 +1905,18 @@ export const BeatGame: React.FC<BeatGameProps> = ({
             <div className="flex items-center justify-between gap-3">
 
               {/* Left: Cover Art (Square) */}
-              <div className="flex-shrink-0">
+              <div className="flex-shrink-0 relative">
                 {currentSong?.coverArt ? (
                   <div className="w-16 h-16 rounded-xl overflow-hidden border border-white/10 shadow-2xl shrink-0 relative group">
                     {/* Playing Indicator Overlay */}
-                    <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                    <div className="absolute inset-0 bg-black/20 flex items-center justify-center z-10">
                       <div className="flex gap-1">
                         <div className="w-1 h-3 bg-green-500 rounded-full animate-[bounce_1s_infinite]" />
                         <div className="w-1 h-4 bg-green-500 rounded-full animate-[bounce_1.2s_infinite]" />
                         <div className="w-1 h-2 bg-green-500 rounded-full animate-[bounce_0.8s_infinite]" />
                       </div>
                     </div>
-                    <img src={currentSong.coverArt} alt="Cover" className="w-full h-full object-cover" />
+                    <img key={currentSong.id} src={currentSong.coverArt} alt="Cover" className="w-full h-full object-cover animate-in fade-in duration-1000" />
                   </div>
                 ) : (
                   <div className="w-16 h-16 rounded-xl bg-zinc-800 border border-white/10 flex items-center justify-center shadow-2xl">
@@ -1402,7 +1937,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                       {currentSong?.fileName.replace(/\.[^/.]+$/, "")}
                     </h3>
                     <div className="flex items-center gap-2">
-                      {selectedMode === 'endless' && (
+                      {selectedMode === 'viberush' && (
                         <span className="text-[8px] font-bold text-white/60 uppercase tracking-widest">
                           TRK {queueIndex + 1}
                         </span>
@@ -1434,7 +1969,12 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                       onClick={(e) => {
                         e.stopPropagation();
                         setIsPaused(true);
-                        audioRef.current?.pause();
+                        // Pause whichever audio is active
+                        const activeAudio = activeAudioRef.current === 'A' ? audioRef.current : audioRefB.current;
+                        activeAudio?.pause();
+                        // Also pause inactive audio (if crossfading)
+                        const inactiveAudio = activeAudioRef.current === 'A' ? audioRefB.current : audioRef.current;
+                        if (inactiveAudio && !inactiveAudio.paused) inactiveAudio.pause();
                       }}
                       className="w-8 h-8 flex items-center justify-center bg-white/5 hover:bg-white/10 rounded-full transition-colors ml-1 active:scale-95 pointer-events-auto"
                     >
@@ -1610,6 +2150,12 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                         <span className="text-[8px] font-black text-blue-400 uppercase tracking-widest mb-1">EXP Earned</span>
                         <span className="text-lg font-black italic text-white">+{expEarned}</span>
                       </div>
+                      {selectedMode === 'viberush' && vibeRushesCompleted > 0 && (
+                        <div className="col-span-2 bg-yellow-400/10 backdrop-blur-2xl border border-yellow-400/20 rounded-2xl p-3 flex flex-col items-center justify-center">
+                          <span className="text-[8px] font-black text-yellow-400 uppercase tracking-widest mb-1">VibeRushes Completed</span>
+                          <span className="text-lg font-black italic text-white">{vibeRushesCompleted} (+{vibeRushesCompleted * 20} Stars)</span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Action Sector */}
@@ -1698,7 +2244,9 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                     {/* Header Group */}
                     <div className="flex flex-col items-center gap-0.5">
                       <span className="text-[9px] font-black uppercase tracking-[0.4em] text-green-400 opacity-80 mb-0.5">Well Done!</span>
-                      <h3 className="text-4xl font-black italic text-white uppercase tracking-tighter drop-shadow-2xl">Song Complete</h3>
+                      <h3 className="text-4xl font-black italic text-white uppercase tracking-tighter drop-shadow-2xl">
+                        {selectedMode === 'viberush' ? 'Vibe Rush' : 'Song Cleared'}
+                      </h3>
                     </div>
 
                     {/* Compact Album Art Pod */}
@@ -1852,7 +2400,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
                       <div className="bg-white/5 backdrop-blur-2xl border border-white/10 rounded-2xl p-4 shadow-xl space-y-3">
                         {/* Mode Selector */}
                         <div className="flex gap-1.5">
-                          {['classic', 'endless'].map(m => (
+                          {['classic', 'viberush'].map(m => (
                             <button
                               key={m}
                               onClick={() => setSelectedMode(m as any)}
@@ -1929,6 +2477,15 @@ export const BeatGame: React.FC<BeatGameProps> = ({
           ref={audioRef}
           onEnded={handleFinish}
           onLoadedMetadata={() => durationRef.current = audioRef.current?.duration || 1}
+        />
+        <audio
+          ref={audioRefB}
+          onEnded={handleFinish}
+          onLoadedMetadata={() => {
+            if (activeAudioRef.current === 'B') {
+              durationRef.current = audioRefB.current?.duration || 1;
+            }
+          }}
         />
       </div>
     </>

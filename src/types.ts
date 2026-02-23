@@ -32,5 +32,5 @@ export interface UserStats {
   stars?: number;
 }
 
-export type GameMode = 'classic' | 'endless';
+export type GameMode = 'classic' | 'viberush';
 export type Level = 'easy' | 'medium' | 'hard';
