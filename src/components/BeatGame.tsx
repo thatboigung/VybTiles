@@ -161,6 +161,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   const crossfadeVisualProgressRef = useRef(1); // 0=fully old art, 1=fully new art
   const currentSongRef = useRef<AudioAnalysis | undefined>(undefined);
   const activeSongRef = useRef<AudioAnalysis | undefined>(undefined); // Metadata for the CURRENTLY active tiles (BPM stability)
+  const songDurationRef = useRef<number>(120); // Fallback to 120s
 
   // Background transition state
   const bgRef = useRef({
@@ -720,10 +721,21 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
   const loadTrackNotes = (analysis: AudioAnalysis, timeOffset: number = 0, append: boolean = false, currentDisplayTime: number = 0) => {
     if (isChoiceActiveRef.current) return; // DON'T load regular notes during choice
+
+    // CLASSIC MODE: Stop producing tiles after 75% of the song
+    let beats = analysis.beats;
+    const songDuration = analysis.duration || (beats.length > 0 ? beats[beats.length - 1] + 2 : 120);
+    songDurationRef.current = songDuration; // Store for render loop
+
+    if (selectedMode === 'classic') {
+      const productionLimit = songDuration * CLASSIC_COMPLETION_THRESHOLD;
+      beats = beats.filter(beatTime => beatTime <= productionLimit);
+    }
+
     let excludeUntil = 0;
     const lastLaneTimes = new Array(LANES).fill(-1); // TRACK LAST SPAWN TIME IN EACH LANE
 
-    const newNotes = analysis.beats.flatMap((beatTime, index) => {
+    const newNotes = beats.flatMap((beatTime, index) => {
       // Skip if this beat falls within a long tile's "exclusive" period
       if (beatTime < excludeUntil) return [];
 
@@ -1243,14 +1255,19 @@ export const BeatGame: React.FC<BeatGameProps> = ({
         }
       } else {
         // CLASSIC MODE: Complete at 75%
-        const rawProgress = displayTime / (durationRef.current || 1);
+        const effectiveDuration = durationRef.current > 5 ? durationRef.current : songDurationRef.current;
+        const rawProgress = displayTime / effectiveDuration;
         progress = Math.min(1, rawProgress / CLASSIC_COMPLETION_THRESHOLD);
         setCompletion(Math.floor(progress * 100));
 
-        if (progress >= 1 && !isCleared && !isGameOver) {
-          handleSuccess();
-          showFeedback('CLASSIC COMPLETE!', 'text-green-400', 1.5);
-          return;
+        if (progress >= 1 && !isCleared && !isGameOver && effectiveDuration > 10) {
+          // Wait for 5 seconds after reaching 100% progress (75% mark reached + 5s buffer)
+          const classicLimit = effectiveDuration * CLASSIC_COMPLETION_THRESHOLD;
+          if (displayTime >= classicLimit + 5) {
+            handleSuccess();
+            showFeedback('CLASSIC COMPLETE!', 'text-green-400', 1.5);
+            return;
+          }
         }
       }
 
