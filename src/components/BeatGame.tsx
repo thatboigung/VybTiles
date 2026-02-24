@@ -604,8 +604,10 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
     const rect = gameAreaRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const lW = rect.width / LANES;
-    const x = (lane * lW) + (lW / 2);
+    const GAMEPLAY_WIDTH = Math.min(480, rect.width);
+    const offsetX = (rect.width - GAMEPLAY_WIDTH) / 2;
+    const lW = GAMEPLAY_WIDTH / LANES;
+    const x = offsetX + (lane * lW) + (lW / 2);
     const speed = getNoteSpeed();
     const targetY = rect.height * TARGET_Y_RATIO;
 
@@ -1032,11 +1034,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
       setSessionPerfects(p => p + rushStars);
 
       setIsCleared(true);
-      const activeAudio = activeAudioRef.current === 'A' ? audioRef.current : audioRefB.current;
-      if (activeAudio) activeAudio.pause();
-      // Also pause inactive audio (if crossfading)
-      const inactiveAudio = activeAudioRef.current === 'A' ? audioRefB.current : audioRef.current;
-      if (inactiveAudio && !inactiveAudio.paused) inactiveAudio.pause();
+      // Removed audio pauses here to keep music playing until awards are claimed
 
       // Calculate Completion based on Song Progress (Time Elapsed)
       // On finish, it's 100%
@@ -1059,11 +1057,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
     setCompletion(100);
     setIsCleared(true);
-
-    const activeAudio = activeAudioRef.current === 'A' ? audioRef.current : audioRefB.current;
-    if (activeAudio) activeAudio.pause();
-    const inactiveAudio = activeAudioRef.current === 'A' ? audioRefB.current : audioRef.current;
-    if (inactiveAudio) inactiveAudio.pause();
+    // Removed audio pauses here to keep music playing until awards are claimed
   }, [sessionPerfects, vibeRushesCompleted]);
 
 
@@ -1091,6 +1085,10 @@ export const BeatGame: React.FC<BeatGameProps> = ({
   // but looking at existing usage, it's expected to be there. 
   // I will just use onExit in my new function to be safe.
   const handleClaimAwards = () => {
+
+    // Stop all audio and reset volumes
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current.volume = 1; }
+    if (audioRefB.current) { audioRefB.current.pause(); audioRefB.current.volume = 1; }
 
     // Trigger save immediately or before exit? 
     // Let's do it before exit to ensure we have the data
@@ -1282,7 +1280,10 @@ export const BeatGame: React.FC<BeatGameProps> = ({
         progressBarRef.current.style.width = `${progress * 100}%`;
       }
 
-      const w = canvas.width, h = canvas.height, targetY = h * TARGET_Y_RATIO, lW = w / LANES;
+      const w = canvas.width, h = canvas.height;
+      const GAMEPLAY_WIDTH = Math.min(480, w);
+      const offsetX = (w - GAMEPLAY_WIDTH) / 2;
+      const targetY = h * TARGET_Y_RATIO, lW = GAMEPLAY_WIDTH / LANES;
 
       if (shake > 0) setShake(s => Math.max(0, s - 2));
 
@@ -1360,11 +1361,13 @@ export const BeatGame: React.FC<BeatGameProps> = ({
         const hitAge = now - laneHits[i];
         if (hitAge < 150) {
           ctx.fillStyle = `rgba(255, 255, 255, ${0.15 * (1 - hitAge / 150)})`;
-          ctx.fillRect(i * lW, 0, lW, h);
+          ctx.fillRect(offsetX + i * lW, 0, lW, h);
         }
         ctx.strokeStyle = 'rgba(255,255,255,0.02)';
-        ctx.beginPath(); ctx.moveTo(i * lW, 0); ctx.lineTo(i * lW, h); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(offsetX + i * lW, 0); ctx.lineTo(offsetX + i * lW, h); ctx.stroke();
       }
+      // Draw last divider line
+      ctx.beginPath(); ctx.moveTo(offsetX + LANES * lW, 0); ctx.lineTo(offsetX + LANES * lW, h); ctx.stroke();
 
       const speed = getNoteSpeed();
 
@@ -1391,7 +1394,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
             // Find min and max x
             let minX = w, maxX = 0;
             group.forEach(n => {
-              const x = (n.lane * lW) + (lW / 2);
+              const x = offsetX + (n.lane * lW) + (lW / 2);
               if (x < minX) minX = x;
               if (x > maxX) maxX = x;
             });
@@ -1516,7 +1519,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
         const y = (note.hit && note.isLong) ? targetY : targetY - (timeDiff * effectiveSpeed);
 
         if (y > -200 && y < h + 200) {
-          const x = (note.lane * lW) + (lW / 2);
+          const x = offsetX + (note.lane * lW) + (lW / 2);
           let nW = lW * 0.92, nH = 150;
 
           // BPM-Synced Bouncing for VibeRush tiles
@@ -1854,7 +1857,11 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     isDraggingRef.current = true;
     const r = gameAreaRef.current?.getBoundingClientRect();
     if (r) {
-      const l = Math.max(0, Math.min(LANES - 1, Math.floor((e.clientX - r.left) / (r.width / LANES))));
+      const GAMEPLAY_WIDTH = Math.min(480, r.width);
+      const offsetX = (r.width - GAMEPLAY_WIDTH) / 2;
+      const lW = GAMEPLAY_WIDTH / LANES;
+      const tapPos = e.clientX - r.left - offsetX;
+      const l = Math.max(0, Math.min(LANES - 1, Math.floor(tapPos / lW)));
       handleHit(l, e.clientY - r.top);
     }
   };
@@ -1863,7 +1870,11 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     isDraggingRef.current = false;
     const r = gameAreaRef.current?.getBoundingClientRect();
     if (r) {
-      const lane = Math.max(0, Math.min(LANES - 1, Math.floor((e.clientX - r.left) / (r.width / LANES))));
+      const GAMEPLAY_WIDTH = Math.min(480, r.width);
+      const offsetX = (r.width - GAMEPLAY_WIDTH) / 2;
+      const lW = GAMEPLAY_WIDTH / LANES;
+      const tapPos = e.clientX - r.left - offsetX;
+      const lane = Math.max(0, Math.min(LANES - 1, Math.floor(tapPos / lW)));
       // Release any held notes in this lane
       holdingNotesRef.current.forEach(id => {
         const note = notesRef.current.find(n => n.id === id);
@@ -1871,8 +1882,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
           holdingNotesRef.current.delete(id);
           note.isFullyHeld = true; // Mark as done so it disappears
           // Spawn release particles
-          const lW = r.width / LANES;
-          const x = (lane * lW) + (lW / 2);
+          const x = offsetX + (lane * lW) + (lW / 2);
           const targetY = r.height * TARGET_Y_RATIO;
           spawnParticles(x, targetY, '#fff', 15);
         }
@@ -1884,7 +1894,11 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     if (isDraggingRef.current) {
       const r = gameAreaRef.current?.getBoundingClientRect();
       if (r) {
-        const l = Math.max(0, Math.min(LANES - 1, Math.floor((e.clientX - r.left) / (r.width / LANES))));
+        const GAMEPLAY_WIDTH = Math.min(480, r.width);
+        const offsetX = (r.width - GAMEPLAY_WIDTH) / 2;
+        const lW = GAMEPLAY_WIDTH / LANES;
+        const tapPos = e.clientX - r.left - offsetX;
+        const l = Math.max(0, Math.min(LANES - 1, Math.floor(tapPos / lW)));
         // Smooth slide: Only update if adjacent or same
         setPlayerLane(prev => {
           if (l === prev) return prev;
@@ -1902,7 +1916,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
         isOpen={showTutorial}
         onClose={handleCloseTutorial}
       />
-      <div className="fixed inset-0 bg-[#0f172a] flex justify-center items-center z-[100] select-none touch-none"
+      <div className="fixed inset-0  flex justify-center items-center z-[100] select-none touch-none"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -1910,7 +1924,7 @@ export const BeatGame: React.FC<BeatGameProps> = ({
 
 
         <div ref={gameAreaRef} className={`relative w-full h-full 
-          lg:w-[480px] lg:h-full lg:rounded-none lg:border-x lg:border-white/10 lg:shadow-2xl 
+          lg:h-full lg:rounded-none lg:border-x lg:border-white/10 lg:shadow-2xl 
           bg-transparent overflow-hidden flex flex-col
           animate-in fade-in zoom-in-95 duration-200 
           ${isExiting ? 'animate-out fade-out zoom-out-95 duration-200 fill-mode-forwards' : ''}

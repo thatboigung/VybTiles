@@ -239,14 +239,20 @@ const App: React.FC = () => {
       // Minimum loading time for smooth UX
       const minLoadTime = new Promise(resolve => setTimeout(resolve, 1800));
 
-      setLoadingStatus('Loading your library...');
+      const isOffline = !navigator.onLine;
+      if (isOffline) {
+        setLoadingStatus('Going Offpeak...');
+      } else {
+        setLoadingStatus('Loading your library...');
+      }
+
       const check = checkSetup();
       const load = loadHistory();
       const loadedTracks = await load;
 
-      // Preload cover art images
+      // Preload cover art images (skip if offline to avoid hangs/timeouts)
       const tracksWithArt = (loadedTracks || []).filter((t: AudioAnalysis) => t.coverArt);
-      if (tracksWithArt.length > 0) {
+      if (tracksWithArt.length > 0 && !isOffline) {
         setLoadingStatus('Loading artwork...');
         const imagePromises = tracksWithArt.slice(0, 20).map((t: AudioAnalysis) =>
           new Promise<void>((resolve) => {
@@ -260,10 +266,12 @@ const App: React.FC = () => {
       }
 
       // Wait for fonts
-      setLoadingStatus('Almost ready...');
-      try {
-        await document.fonts.ready;
-      } catch (e) { /* fonts API not supported, skip */ }
+      if (!isOffline) {
+        setLoadingStatus('Almost ready...');
+        try {
+          await document.fonts.ready;
+        } catch (e) { /* fonts API not supported, skip */ }
+      }
 
       await minLoadTime;
 
