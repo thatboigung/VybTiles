@@ -341,6 +341,16 @@ const App: React.FC = () => {
   };
 
   const handleFileUpload = async (file: File) => {
+    // Check for duplicates (same name and size)
+    const isDuplicate = history.some(track =>
+      track.fileName === file.name && track.fileSize === file.size
+    );
+
+    if (isDuplicate) {
+      alert("This song is already in your library!");
+      return;
+    }
+
     if ((user.stars || 0) < 10) {
       setInsufficientFunds({ isOpen: true, currency: 'stars', required: 10 });
       return;
