@@ -1789,6 +1789,44 @@ export const BeatGame: React.FC<BeatGameProps> = ({
     };
   }, [selectedMode, crossfadeToNextSong]);
 
+  // Handle 10s delay then 5s volume fade-out when song is cleared
+  useEffect(() => {
+    if (!isCleared) return;
+
+    let fadeTimeout: ReturnType<typeof setTimeout>;
+    let fadeAnimationFrame: number;
+
+    fadeTimeout = setTimeout(() => {
+      const activeAudio = activeAudioRef.current === 'A' ? audioRef.current : audioRefB.current;
+      if (!activeAudio) return;
+
+      const fadeDuration = 4000; // 4 seconds fade
+      const startVolume = activeAudio.volume;
+      const startTime = performance.now();
+
+      const animateFade = (now: number) => {
+        const elapsed = now - startTime;
+        const progress = Math.min(1, elapsed / fadeDuration);
+
+        // Safely update volume
+        activeAudio.volume = Math.max(0, Math.min(1, startVolume * (1 - progress)));
+
+        if (progress < 1) {
+          fadeAnimationFrame = requestAnimationFrame(animateFade);
+        } else {
+          activeAudio.pause();
+          activeAudio.volume = 1.0; // Reset for next song
+        }
+      };
+
+      fadeAnimationFrame = requestAnimationFrame(animateFade);
+    }, 10000); // 10 seconds delay
+
+    return () => {
+      clearTimeout(fadeTimeout);
+      if (fadeAnimationFrame) cancelAnimationFrame(fadeAnimationFrame);
+    };
+  }, [isCleared]);
 
   // Keyboard Controls
   useEffect(() => {
