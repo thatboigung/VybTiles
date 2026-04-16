@@ -7,7 +7,7 @@ const TARGET_Y_RATIO = 0.8;
 const CLASSIC_COMPLETION_THRESHOLD = 0.75;
 
 const BG_PALETTE = [
-  '#1e1b4b', // Royal Indigo (Focus Base
+  '#1b1b1bff', // Royal Indigo (Focus Base
 
   '#111827', // Obsidian (Immersion Depth)
 ];
